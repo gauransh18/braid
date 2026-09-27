@@ -34,6 +34,23 @@ git merge braid/<runId>/integration
 
 Press Ctrl-C to stop the agents. Work already merged stays on the integration branch.
 
+## Watch it live
+
+```bash
+braid run plans/rate-limit.json --watch   # run + dashboard
+braid watch                               # dashboard for this repo's runs (any terminal)
+braid demo                                # scripted mock run, no agents, no spend
+```
+
+The dashboard opens at `http://127.0.0.1:4777`. It is read-only and only listens on this machine.
+It shows:
+
+- **The floor:** each agent is a pixel blob at a desk. Its mood follows its task: asleep while pending, typing while running, a magnifier while verifying, glasses while reviewing, jumping while merging, happy when done, flattened when failed, tied up when blocked. The lines between desks are dependencies.
+- **The braid:** the integration branch drawn as a rope that gains a strand in the task's color on every verified merge.
+- **Activity:** every harness event (verify results, review verdicts, conflicts, rollbacks).
+- **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
+- **Knot:** the mascot, which narrates what the run is doing.
+
 ## Plan format
 
 See [examples/plan.json](examples/plan.json). The fields are:

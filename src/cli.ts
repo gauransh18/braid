@@ -5,18 +5,22 @@ import { ClaudeDriver } from './drivers/claude.js';
 import { CodexDriver } from './drivers/codex.js';
 import { DriverRegistry } from './drivers/driver.js';
 import { MockDriver } from './drivers/mock.js';
+import { createDemoRun } from './demo.js';
 import { Git } from './git.js';
 import { Orchestrator } from './orchestrator.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
 import { RunStore, type HarnessEvent } from './store.js';
 import type { RunState } from './types.js';
+import { startWatch } from './watch.js';
 
 const USAGE = `braid - headless multi-agent harness
 
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
-  braid run <plan.json> [--concurrency N] [--budget USD] [--keep-worktrees]
+  braid run <plan.json> [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
+  braid watch [--port 4777]      live dashboard for this repo's runs
+  braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
   braid status [runId]
   braid runs
 
@@ -75,6 +79,8 @@ async function main(argv: string[]): Promise<number> {
       concurrency: { type: 'string' },
       budget: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
+      watch: { type: 'boolean' },
+      port: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -83,7 +89,27 @@ async function main(argv: string[]): Promise<number> {
     console.log(USAGE);
     return cmd ? 0 : 1;
   }
+  const port = values.port ? Number(values.port) : undefined;
+
+  if (cmd === 'demo') {
+    const orch = await createDemoRun();
+    const watch = await startWatch(orch.repo, port);
+    console.log(`demo run ${orch.runId} in ${orch.repo}`);
+    console.log(`watch:  ${watch.url}#run=${orch.runId}`);
+    orch.store.onEvent(printEvent);
+    await orch.run();
+    console.log(`
+demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
+    await new Promise(() => undefined);
+  }
+
   const repo = await Git.toplevel(process.cwd());
+
+  if (cmd === 'watch') {
+    const watch = await startWatch(repo, port);
+    console.log(`braid watch: ${watch.url}  (Ctrl-C to exit)`);
+    await new Promise(() => undefined);
+  }
 
   if (cmd === 'plan') {
     if (!arg) throw new Error('plan needs a goal');
@@ -114,6 +140,10 @@ async function main(argv: string[]): Promise<number> {
     });
     const orch = new Orchestrator({ repo, plan, drivers: registry(), signal: ac.signal, keepWorktrees: values['keep-worktrees'] });
     orch.store.onEvent(printEvent);
+    if (values.watch) {
+      const watch = await startWatch(repo, port);
+      console.log(`watch:  ${watch.url}#run=${orch.runId}`);
+    }
     const state = await orch.run();
     console.log('');
     printState(state);

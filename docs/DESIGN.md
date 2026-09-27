@@ -42,6 +42,7 @@ plan.json ─► Orchestrator (code, deterministic)
 - `src/drivers/*`: the `Driver` interface plus the Claude, Codex (not yet tested against a live install) and mock drivers. Every CLI maps to one `AgentEvent` stream.
 - `src/git.ts`: worktrees, commits, merges. It only ever writes to `braid/*` branches.
 - `src/store.ts`: `.braid/runs/<id>/` holds `plan.json`, `state.json` (written atomically), `events.jsonl`, and `tasks/<id>/<role>-<n>.jsonl` with the full transcript of every agent turn.
+- `src/watch.ts` + `ui/index.html`: a read-only dashboard with no dependencies. It listens on loopback only, rejects foreign `Host` headers, and polls the run files (fs.watch is unreliable on Windows). The mascot and agent sprites are original pixel art drawn in code, under MIT.
 - `src/planner.ts`: a read-only agent that turns a goal into a checked plan. You edit the plan before running it.
 
 ## Invariants
@@ -70,7 +71,7 @@ containers (see the roadmap) for untrusted work.
 
 1. **Cheaper conflict handling.** Today a merge conflict throws away the attempt and redoes it. Instead, merge the integration branch into the task branch and have the agent resolve the conflict markers. (In the smoke test, a conflict roughly doubled that task's cost.)
 2. **Resume.** Restart an interrupted run from `state.json`, reusing tasks that are already merged.
-3. **Watch UI.** A small local web page that tails `events.jsonl`, showing the DAG, live agent transcripts and spend.
+3. ~~**Watch UI.**~~ Shipped as `braid watch`, `braid run --watch` and `braid demo`: a local read-only page (`ui/index.html`, `src/watch.ts`) that tails the run files over SSE.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.
 6. **Evals.** A fixed benchmark of real tasks tracking pass rate, cost and wall time per driver and model, so "better" is measured.

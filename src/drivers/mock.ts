@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { AgentResult } from '../types.js';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { AgentEvent, AgentResult } from '../types.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
 export interface MockStep {
@@ -9,10 +10,14 @@ export interface MockStep {
   text?: string;
   ok?: boolean;
   costUsd?: number;
+  /** Transcript events to emit before finishing (demo mode). */
+  events?: AgentEvent[];
+  /** Total simulated run time, spread across the events. */
+  delayMs?: number;
 }
 
 /**
- * Deterministic driver for tests and dry runs. `script` picks the step for a call;
+ * Deterministic driver for tests and demos. `script` picks the step for a call;
  * the default writes nothing and approves (so reviewers pass).
  */
 export class MockDriver implements Driver {
@@ -25,6 +30,14 @@ export class MockDriver implements Driver {
     const step = this.script(opts, this.calls.length);
     this.calls.push(opts);
     opts.onEvent?.({ kind: 'start', sessionId: `mock-${this.calls.length}` });
+    const events = step.events ?? [];
+    const gap = (step.delayMs ?? 0) / (events.length + 1);
+    for (const e of events) {
+      if (gap) await sleep(gap, undefined, { signal: opts.signal }).catch(() => undefined);
+      opts.onEvent?.(e);
+    }
+    if (gap) await sleep(gap, undefined, { signal: opts.signal }).catch(() => undefined);
+    if (opts.signal?.aborted) return { ok: false, text: 'aborted', costUsd: 0 };
     if (opts.canEdit) {
       for (const [rel, content] of Object.entries(step.files ?? {})) {
         const path = join(opts.cwd, rel);

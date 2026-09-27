@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>braid watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect x='4' y='6' width='8' height='7' fill='%23b48cff'/%3E%3Crect x='3' y='8' width='10' height='4' fill='%23b48cff'/%3E%3Crect x='7' y='2' width='2' height='4' fill='%23ff7a90'/%3E%3Crect x='6' y='9' width='1' height='2' fill='%2312131c'/%3E%3Crect x='9' y='9' width='1' height='2' fill='%2312131c'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f1e7; --bg-2: #efe8da; --panel: #fffdf8; --panel-2: #f8f3ea; --line: #e2d8c6; --line-2: #d3c7b1;
+  --text: #26222e; --muted: #6f6a78; --faint: #a39d8f;
+  --accent: #7c4dff; --accent-soft: #ece4ff;
+  --ok: #1f9d63; --warn: #b7791f; --err: #d64545; --info: #2f7fd1;
+  --ok-soft: #ddf3e8; --warn-soft: #fbefd8; --err-soft: #fbe2e2; --info-soft: #e0eefb;
+  --shadow: 0 1px 0 rgba(38,34,46,.06), 0 6px 18px -8px rgba(38,34,46,.18);
+  --weave: rgba(38,34,46,.035);
+  --sprite-ink: #26222e;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12131c; --bg-2: #171926; --panel: #1d1f2d; --panel-2: #232638; --line: #2c2f44; --line-2: #3a3e58;
+    --text: #ecebf5; --muted: #9a9cb3; --faint: #666985;
+    --accent: #b48cff; --accent-soft: #2c2448;
+    --ok: #3fcf8e; --warn: #f5b942; --err: #ff6b6b; --info: #6cb6ff;
+    --ok-soft: #173327; --warn-soft: #3a2f16; --err-soft: #3b1d22; --info-soft: #182a40;
+    --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.6);
+    --weave: rgba(255,255,255,.025);
+    --sprite-ink: #12131c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12131c; --bg-2: #171926; --panel: #1d1f2d; --panel-2: #232638; --line: #2c2f44; --line-2: #3a3e58;
+  --text: #ecebf5; --muted: #9a9cb3; --faint: #666985;
+  --accent: #b48cff; --accent-soft: #2c2448;
+  --ok: #3fcf8e; --warn: #f5b942; --err: #ff6b6b; --info: #6cb6ff;
+  --ok-soft: #173327; --warn-soft: #3a2f16; --err-soft: #3b1d22; --info-soft: #182a40;
+  --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.6);
+  --weave: rgba(255,255,255,.025);
+  --sprite-ink: #12131c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(0deg, var(--weave) 0 2px, transparent 2px 12px),
+    repeating-linear-gradient(90deg, var(--weave) 0 2px, transparent 2px 12px);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.pixel { font-family: "Pixelify Sans", ui-monospace, monospace; letter-spacing: .01em; }
+.mono { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; }
+canvas.sprite { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* ---------- header ---------- */
+.top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 10px 20px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand canvas { width: 60px; height: 60px; margin: -6px -4px -8px -8px; }
+.wordmark { font-size: 26px; font-weight: 700; line-height: 1; }
+.wordmark small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 3px; }
+.bubble {
+  position: relative; max-width: 360px; padding: 7px 12px; border-radius: 10px;
+  background: var(--panel); border: 2px solid var(--line-2); font-size: 13px; box-shadow: var(--shadow);
+}
+.bubble::before {
+  content: ""; position: absolute; left: -8px; top: 50%; width: 10px; height: 10px; margin-top: -5px;
+  background: var(--panel); border-left: 2px solid var(--line-2); border-bottom: 2px solid var(--line-2);
+  transform: rotate(45deg);
+}
+.spacer { flex: 1; }
+.run-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.select {
+  appearance: none; background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 28px 6px 10px; color: var(--text); font-size: 13px;
+  max-width: 260px;
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+.pill.running { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.pill.running::before { animation: blink 1s steps(2) infinite; }
+.pill.done { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.pill.failed, .pill.aborted { color: var(--err); background: var(--err-soft); border-color: transparent; }
+@keyframes blink { 50% { opacity: .25; } }
+.stat { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+.stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.stat .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.meter.hot i { background: var(--warn); }
+.icon-btn {
+  width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel);
+  cursor: pointer; display: grid; place-items: center;
+}
+
+/* ---------- layout ---------- */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; padding: 18px 20px 28px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.panel-h { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px 0; }
+.panel-h h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.panel-h .sub { color: var(--muted); font-size: 12px; }
+.goal { padding: 4px 16px 0; color: var(--muted); font-size: 13px; }
+
+/* ---------- floor (DAG) ---------- */
+.floor-wrap { position: relative; overflow-x: auto; overflow-y: hidden; padding: 14px 16px 18px; }
+.floor { position: relative; display: flex; gap: 56px; min-width: min-content; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 16px; width: 220px; flex: none; }
+.col-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: -6px; }
+svg.threads { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+svg.threads path { fill: none; stroke-width: 3; stroke-linecap: round; opacity: .55; }
+svg.threads path.live { stroke-dasharray: 2 7; animation: flow .7s linear infinite; opacity: .95; }
+svg.threads path.dim { opacity: .18; }
+@keyframes flow { to { stroke-dashoffset: -9; } }
+
+.desk {
+  position: relative; z-index: 1; display: grid; grid-template-columns: 56px 1fr; gap: 4px 10px; align-items: center;
+  width: 100%; text-align: left; padding: 10px 12px 10px 8px; border-radius: 12px; cursor: pointer;
+  background: var(--panel-2); border: 2px solid var(--line); transition: transform .15s, border-color .15s, background .15s;
+}
+.desk:hover { transform: translateY(-2px); border-color: var(--line-2); }
+.desk.sel { border-color: var(--tc); background: color-mix(in srgb, var(--tc) 10%, var(--panel-2)); }
+.desk canvas { width: 56px; height: 56px; grid-row: span 3; }
+.desk .t { font-weight: 600; font-size: 13.5px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk .id { font-size: 12px; color: var(--muted); }
+.desk .row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.desk::after {
+  content: ""; position: absolute; left: -2px; top: 12px; bottom: 12px; width: 4px; border-radius: 0 3px 3px 0; background: var(--tc);
+}
+.chip {
+  font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; background: var(--line); color: var(--muted);
+  text-transform: lowercase;
+}
+.chip.running, .chip.verifying, .chip.reviewing, .chip.merging { background: var(--info-soft); color: var(--info); }
+.chip.done { background: var(--ok-soft); color: var(--ok); }
+.chip.failed { background: var(--err-soft); color: var(--err); }
+.chip.blocked { background: var(--warn-soft); color: var(--warn); }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 7px; height: 7px; border-radius: 2px; background: var(--line-2); }
+.dots i.used { background: var(--tc); }
+.dots i.bad { background: var(--err); }
+.cost { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* ---------- side: braid + feed ---------- */
+.side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.braid-box { padding: 6px 16px 16px; }
+.braid { display: grid; grid-template-columns: 54px 1fr; }
+.braid svg { display: block; }
+.beads { position: relative; }
+.bead { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; transform: translateY(-50%); }
+.bead b { font-weight: 600; }
+.bead span { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.braid-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.branch { font-size: 11.5px; color: var(--muted); padding: 2px 16px 0; overflow-wrap: anywhere; }
+
+.feed { list-style: none; margin: 0; padding: 6px 8px 10px; max-height: 420px; overflow: auto; }
+.feed li { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 6px; font-size: 12.5px; }
+.feed li:hover { background: var(--panel-2); }
+.feed li .sw { width: 8px; height: 8px; border-radius: 2px; align-self: center; }
+.feed li time { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.feed li.err { color: var(--err); }
+.feed li.ok { color: var(--ok); }
+.feed li.new { animation: pop .5s ease-out; }
+@keyframes pop { from { background: var(--accent-soft); } }
+
+/* ---------- inspector ---------- */
+.scrim { position: fixed; inset: 0; background: rgba(10,10,20,.35); z-index: 30; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.scrim.open { opacity: 1; pointer-events: auto; }
+.inspector {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 31; width: min(560px, 100vw);
+  background: var(--panel); border-left: 1px solid var(--line); box-shadow: -20px 0 40px -20px rgba(0,0,0,.4);
+  transform: translateX(102%); transition: transform .25s ease; display: flex; flex-direction: column;
+}
+.inspector.open { transform: none; }
+.ins-h { display: grid; grid-template-columns: 84px 1fr auto; gap: 12px; align-items: center; padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
+.ins-h canvas { width: 84px; height: 84px; }
+.ins-h h3 { margin: 0 0 4px; font-size: 20px; }
+.ins-h .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.ins-body { flex: 1; overflow: auto; padding: 12px 16px 24px; }
+.ins-sec { margin: 6px 0 16px; }
+.ins-sec h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
+.prompt { white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
+.errbox { white-space: pre-wrap; background: var(--err-soft); color: var(--err); border-radius: 8px; padding: 10px; font-size: 12px; max-height: 220px; overflow: auto; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tab { border: 1px solid var(--line-2); background: var(--panel-2); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tx { display: flex; flex-direction: column; gap: 6px; }
+.tx .msg { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px 10px 10px 3px; padding: 8px 10px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tx .tool { display: flex; gap: 8px; align-items: baseline; font-size: 12px; padding: 2px 4px; }
+.tx .tool b { color: var(--accent); font-weight: 600; flex: none; }
+.tx .tool code { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx .res { font-size: 11.5px; color: var(--faint); padding: 0 4px 0 22px; white-space: pre-wrap; max-height: 3.2em; overflow: hidden; }
+.tx .res.bad { color: var(--err); }
+.tx .result { border-radius: 8px; padding: 8px 10px; font-size: 12.5px; white-space: pre-wrap; }
+.tx .result.ok { background: var(--ok-soft); }
+.tx .result.bad { background: var(--err-soft); }
+.checks { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.checks div { display: flex; gap: 8px; align-items: baseline; }
+.close { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-2); cursor: pointer; font-size: 18px; line-height: 1; }
+
+/* ---------- empty ---------- */
+.empty { display: grid; place-items: center; text-align: center; gap: 10px; padding: 70px 20px; color: var(--muted); }
+.empty canvas { width: 120px; height: 120px; }
+.empty code { background: var(--panel-2); padding: 3px 8px; border-radius: 6px; color: var(--text); }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; padding: 14px 16px 24px; }
+  .top { padding: 10px 16px; }
+  .bubble { display: none; }
+}
+@media (max-width: 560px) {
+  .floor { flex-direction: column; gap: 22px; }
+  .col { width: 100%; }
+  .stat { min-width: 90px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <canvas class="sprite" id="knot" width="20" height="20" aria-hidden="true"></canvas>
+    <div class="wordmark pixel">braid<small>watch</small></div>
+  </div>
+  <div class="bubble" id="bubble" aria-live="polite">Loading the loom...</div>
+  <div class="spacer"></div>
+  <div class="run-meta">
+    <select class="select" id="runPick" aria-label="Run"></select>
+    <span class="pill" id="runStatus">-</span>
+    <div class="stat"><span class="k">Merged</span><span class="v" id="progressV">-</span><div class="meter"><i id="progressM"></i></div></div>
+    <div class="stat"><span class="k">Spend</span><span class="v" id="spendV">-</span><div class="meter" id="spendMeter"><i id="spendM"></i></div></div>
+    <div class="stat"><span class="k">Elapsed</span><span class="v" id="elapsedV">-</span></div>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle theme">&#9680;</button>
+  </div>
+</header>
+
+<main id="main"></main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="inspector" id="inspector" aria-label="Task details" aria-hidden="true">
+  <div class="ins-h">
+    <canvas class="sprite" id="insSprite" width="20" height="20" aria-hidden="true"></canvas>
+    <div><h3 class="pixel" id="insTitle"></h3><div class="meta" id="insMeta"></div></div>
+    <button class="close" id="insClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="ins-body" id="insBody"></div>
+</aside>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= palette + sprites ================= */
+const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
+const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
+const MOOD = { pending: 'sleep', running: 'work', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost' };
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mix(h, target, amt) {
+  const a = hexToRgb(h), b = target === 'black' ? [18, 16, 30] : [255, 255, 255];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amt)).join(',')})`;
+}
+function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
+
+/**
+ * 20x20 pixel blob. Original art drawn procedurally: a round body, a braided
+ * tuft on top, and a face + props that change with mood. f = animation frame.
+ */
+function drawBlob(ctx, base, mood, f, tuft) {
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--sprite-ink').trim() || '#12131c';
+  ctx.clearRect(0, 0, 20, 20);
+  const color = mood === 'ghost' ? grey(base) : base;
+  ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
+  const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+
+  let rx = 6.5, ry = 5.5, cy = 12.5, bob = 0;
+  if (mood === 'work') bob = [0, -1, 0, 0][f % 4];
+  if (mood === 'jump') bob = [0, -2, -3, -2][f % 4];
+  if (mood === 'happy') bob = [0, -1][f % 2];
+  if (mood === 'sleep') { rx = 6.5 + (f % 8 < 4 ? .3 : 0); ry = 5.5 - (f % 8 < 4 ? .3 : 0); }
+  if (mood === 'dead') { rx = 8.2; ry = 3.2; cy = 15.5; }
+  cy += bob;
+
+  const inside = (x, y) => { const dx = (x + .5 - 10) / rx, dy = (y + .5 - cy) / ry; return dx * dx + dy * dy <= 1 && y <= 17; };
+  const edge = mix(color, 'black', .45), light = mix(color, 'white', .5);
+  let top = 20;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    if (!inside(x, y)) continue;
+    top = Math.min(top, y);
+    const border = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    px(x, y, border ? edge : color);
+  }
+  // shine
+  if (mood !== 'dead') { px(6, top + 2, light); px(7, top + 1, light); px(6, top + 1, light); }
+
+  // braided tuft: three rows zig-zagging in alternating strands
+  if (mood !== 'dead') {
+    const strands = tuft || [mix(color, 'white', .35), edge, color];
+    const sway = mood === 'work' || mood === 'jump' ? (f % 4 < 2 ? 0 : 1) : 0;
+    for (let k = 1; k <= 4; k++) {
+      const x = 9 + ((k + sway) % 2);
+      px(x, top - k, strands[k % strands.length]);
+      px(x === 9 ? 10 : 9, top - k, k === 4 ? strands[(k + 1) % strands.length] : 'transparent');
+    }
+    px(9, top - 5, strands[0]); px(11, top - 5, strands[1]); px(10, top - 5, strands[2]);
+  }
+
+  // face
+  const ey = Math.round(cy) - 1;
+  const blink = f % 26 === 0;
+  const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  switch (mood) {
+    case 'sleep':
+      px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
+      { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
+        [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      break;
+    case 'happy':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      break;
+    case 'dead':
+      [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      break;
+    case 'tied':
+      eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? '#a0703c' : '#c89452');
+      px(16, Math.round(cy) + 1, '#a0703c'); px(17, Math.round(cy) + 3, '#c89452');
+      break;
+    case 'inspect': {
+      const look = f % 8 < 4 ? 1 : 0;
+      eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
+      // magnifying glass
+      [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
+      px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
+      px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      break;
+    }
+    case 'review':
+      eyes(7, 12, ey, blink ? 1 : 2);
+      for (let x = 5; x <= 14; x++) if (x !== 9 && x !== 10) px(x, ey - 1, ink);
+      px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
+      px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
+      px(9, ey - 1, ink); px(10, ey - 1, ink);
+      break;
+    case 'work': {
+      eyes(7, 12, ey + 1, blink ? 1 : 2);
+      // laptop in front
+      const ly = Math.round(cy) + 3 - bob;
+      for (let x = 5; x <= 14; x++) { px(x, ly + 1, '#7f7c92'); }
+      for (let x = 6; x <= 13; x++) { px(x, ly, '#9c99b0'); }
+      px(8 + (f % 4), ly, mix(base, 'white', .3));
+      if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
+      break;
+    }
+    case 'jump':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      break;
+    default:
+      eyes(7, 12, ey, blink ? 1 : 2);
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* registry of live sprites, redrawn together at a pixel-y 8 fps */
+const sprites = new Map();
+let frame = 0;
+function registerSprite(canvas, getState) { sprites.set(canvas, getState); }
+function renderSprites() {
+  for (const [c, get] of sprites) {
+    if (!c.isConnected) { sprites.delete(c); continue; }
+    const s = get();
+    drawBlob(c.getContext('2d'), s.color, s.mood, frame + (s.phase || 0), s.tuft);
+  }
+}
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+setInterval(() => { if (!reduced) frame++; renderSprites(); }, 125);
+
+/* ================= state ================= */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const S = { runs: [], runId: null, plan: null, state: null, events: [], es: null, selected: null, logTimer: null, logTab: null, color: {} };
+
+registerSprite($('knot'), () => ({ color: KNOT.color, tuft: KNOT.tuft, mood: knotMood() }));
+function knotMood() {
+  const st = S.state?.status;
+  if (!st) return 'sleep';
+  if (st === 'running') return Object.values(S.state.tasks).some(t => t.status === 'failed') ? 'inspect' : 'work';
+  if (st === 'done') return 'happy';
+  if (st === 'failed') return 'tied';
+  return 'sleep';
+}
+
+/* ================= data ================= */
+async function getJSON(url) { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); }
+
+async function loadRuns() {
+  try { S.runs = await getJSON('/api/runs'); } catch { S.runs = []; }
+  const pick = $('runPick');
+  const cur = pick.value;
+  pick.innerHTML = S.runs.map(r => `<option value="${esc(r.runId)}">${esc(fmtRunLabel(r))}</option>`).join('');
+  const wanted = new URLSearchParams(location.hash.slice(1)).get('run');
+  const target = S.runId || (wanted && S.runs.some(r => r.runId === wanted) ? wanted : S.runs[0]?.runId);
+  if (target) pick.value = target;
+  else if (cur) pick.value = cur;
+  if (!S.runId && target) openRun(target);
+  if (!S.runs.length) renderEmpty();
+}
+function fmtRunLabel(r) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(r.runId);
+  const when = m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : r.runId;
+  return `${when} - ${r.status} - $${(r.costUsd || 0).toFixed(2)}`;
+}
+
+async function openRun(id) {
+  if (S.es) S.es.close();
+  closeInspector();
+  Object.assign(S, { runId: id, plan: null, state: null, events: [], color: {} });
+  history.replaceState(null, '', '#run=' + id);
+  $('runPick').value = id;
+  try {
+    const d = await getJSON(`/api/run/${id}`);
+    S.plan = d.plan; S.state = d.state;
+  } catch {}
+  assignColors();
+  renderAll();
+  const es = new EventSource(`/api/run/${id}/events`);
+  S.es = es;
+  let pending = false;
+  const schedule = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; renderAll(); }); } };
+  es.addEventListener('harness', (m) => {
+    try { const e = JSON.parse(m.data); e._new = true; S.events.push(e); } catch {}
+    if (!S.plan) getJSON(`/api/run/${id}`).then(d => { S.plan = d.plan; assignColors(); schedule(); }).catch(() => {});
+    schedule();
+  });
+  es.addEventListener('state', (m) => {
+    try { S.state = JSON.parse(m.data); } catch {}
+    if (!S.plan) getJSON(`/api/run/${id}`).then(d => { S.plan = d.plan; assignColors(); schedule(); }).catch(() => {});
+    schedule();
+  });
+}
+
+function assignColors() {
+  (S.plan?.tasks || []).forEach((t, i) => { S.color[t.id] = TASK_COLORS[i % TASK_COLORS.length]; });
+}
+const colorOf = (id) => S.color[id] || '#9a9cb3';
+
+/* ================= render ================= */
+function renderEmpty() {
+  $('main').innerHTML = `<div class="empty"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas>
+    <div class="pixel" style="font-size:22px;color:var(--text)">No runs yet</div>
+    <div>Start one with <code class="mono">braid run plan.json --watch</code> or try <code class="mono">braid demo</code>.</div></div>`;
+  registerSprite($('emptyKnot'), () => ({ color: KNOT.color, tuft: KNOT.tuft, mood: 'sleep' }));
+  $('bubble').textContent = 'Zzz... nothing on the loom yet.';
+}
+
+function depthMap(tasks) {
+  const byId = Object.fromEntries(tasks.map(t => [t.id, t]));
+  const memo = {};
+  const d = (id) => memo[id] ?? (memo[id] = 1 + Math.max(-1, ...(byId[id]?.deps || []).map(d)));
+  tasks.forEach(t => d(t.id));
+  return memo;
+}
+
+function renderAll() {
+  if (!S.plan || !S.state) {
+    if (!S.runs.length) return renderEmpty();
+    $('main').innerHTML = `<div class="empty"><div class="pixel" style="font-size:18px">Setting up the loom...</div></div>`;
+    renderHeader();
+    return;
+  }
+  renderHeader();
+  let main = $('layout');
+  if (!main || main.dataset.run !== S.runId) {
+    $('main').innerHTML = `<div class="layout" id="layout" data-run="${esc(S.runId)}">
+      <section class="panel" aria-label="Task floor">
+        <div class="panel-h"><h2 class="pixel">The floor</h2><span class="sub" id="floorSub"></span></div>
+        <div class="goal" id="goal"></div>
+        <div class="floor-wrap"><div class="floor" id="floor"><svg class="threads" id="threads"></svg></div></div>
+      </section>
+      <div class="side">
+        <section class="panel" aria-label="Integration braid">
+          <div class="panel-h"><h2 class="pixel">The braid</h2><span class="sub">integration branch</span></div>
+          <div class="branch mono" id="branch"></div>
+          <div class="braid-box" id="braid"></div>
+        </section>
+        <section class="panel" aria-label="Activity">
+          <div class="panel-h"><h2 class="pixel">Activity</h2><span class="sub" id="feedSub"></span></div>
+          <ul class="feed" id="feed"></ul>
+        </section>
+      </div>
+    </div>`;
+    buildFloor();
+  }
+  updateFloor();
+  renderBraid();
+  renderFeed();
+  drawThreads();
+  if (S.selected) renderInspector(false);
+}
+
+function renderHeader() {
+  const st = S.state;
+  const pill = $('runStatus');
+  pill.className = 'pill ' + (st?.status || '');
+  pill.textContent = st?.status || 'starting';
+  const tasks = st ? Object.values(st.tasks) : [];
+  const done = tasks.filter(t => t.status === 'done').length;
+  $('progressV').textContent = tasks.length ? `${done} / ${tasks.length}` : '-';
+  $('progressM').style.width = tasks.length ? (100 * done / tasks.length) + '%' : '0';
+  $('progressM').style.background = 'var(--ok)';
+  const spend = st?.costUsd || 0, budget = S.plan?.budgetUsd;
+  $('spendV').textContent = budget ? `$${spend.toFixed(2)} / $${budget}` : `$${spend.toFixed(2)}`;
+  $('spendM').style.width = budget ? Math.min(100, 100 * spend / budget) + '%' : '0';
+  $('spendMeter').classList.toggle('hot', !!budget && spend / budget > .8);
+  $('bubble').textContent = knotSays();
+}
+
+function knotSays() {
+  const st = S.state;
+  if (!st) return 'Warming up the loom...';
+  const tasks = Object.values(st.tasks);
+  const n = (s) => tasks.filter(t => t.status === s).length;
+  if (st.status === 'done') return `All ${tasks.length} strands braided. Review ${st.integrationBranch} and merge it when you're happy.`;
+  if (st.status === 'failed') return `Stopped with ${n('failed')} failed and ${n('blocked')} blocked. ${n('done')} strands still made it in.`;
+  if (st.status === 'aborted') return 'Run stopped. Merged work is safe on the integration branch.';
+  const last = [...S.events].reverse().find(e => ['verify', 'review', 'merge', 'merge_reverted'].includes(e.type));
+  if (last?.type === 'verify' && last.code !== 0) return `${last.task} failed \`${last.cmd}\`. Sending it back with the output.`;
+  if (last?.type === 'review' && !last.approve) return `Reviewer bounced ${last.task}: ${(last.issues || [])[0] || 'changes requested'}.`;
+  if (last?.type === 'merge' && !last.ok) return `${last.task} tangled with another strand. Re-weaving on the latest braid.`;
+  if (last?.type === 'merge_reverted') return `${last.task} broke the combined build, so I unpicked it.`;
+  const busy = tasks.filter(t => ['running', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
+  return busy ? `Weaving ${busy} strand${busy > 1 ? 's' : ''}. ${n('done')} braided, ${n('pending')} waiting.` : 'Picking the next strands...';
+}
+
+function buildFloor() {
+  const tasks = S.plan.tasks;
+  const depth = depthMap(tasks);
+  const cols = [];
+  tasks.forEach(t => (cols[depth[t.id]] ||= []).push(t));
+  const floor = $('floor');
+  cols.forEach((col, i) => {
+    const el = document.createElement('div');
+    el.className = 'col';
+    el.innerHTML = `<div class="col-h pixel">${i === 0 ? 'Start' : 'Wave ' + (i + 1)}</div>`;
+    col.forEach((t, j) => {
+      const b = document.createElement('button');
+      b.className = 'desk';
+      b.id = 'desk-' + t.id;
+      b.style.setProperty('--tc', colorOf(t.id));
+      b.innerHTML = `<canvas class="sprite" width="20" height="20" aria-hidden="true"></canvas>
+        <div class="t">${esc(t.title || t.id)}</div>
+        <div class="id mono">${esc(t.id)}</div>
+        <div class="row"><span class="chip" data-chip></span><span class="dots" data-dots></span><span class="cost mono" data-cost></span></div>`;
+      b.addEventListener('click', () => openInspector(t.id));
+      el.appendChild(b);
+      const phase = (i * 3 + j * 5) % 8;
+      registerSprite(b.querySelector('canvas'), () => ({ color: colorOf(t.id), mood: MOOD[S.state?.tasks[t.id]?.status] || 'sleep', phase }));
+    });
+    floor.appendChild(el);
+  });
+  $('goal').textContent = S.plan.goal || '';
+  new ResizeObserver(drawThreads).observe(floor);
+}
+
+function maxAttempts(t) { return Math.max(1, t.maxAttempts ?? S.plan.maxAttempts ?? 2); }
+
+function updateFloor() {
+  const tasks = S.plan.tasks;
+  for (const t of tasks) {
+    const el = $('desk-' + t.id);
+    if (!el) continue;
+    const s = S.state.tasks[t.id] || { status: 'pending', attempts: 0, costUsd: 0 };
+    const chip = el.querySelector('[data-chip]');
+    chip.className = 'chip ' + s.status;
+    chip.textContent = s.status;
+    const max = maxAttempts(t);
+    el.querySelector('[data-dots]').innerHTML = Array.from({ length: max }, (_, i) => {
+      const used = i < s.attempts;
+      const bad = used && (i < s.attempts - 1 || s.status === 'failed');
+      return `<i class="${bad ? 'bad' : used ? 'used' : ''}"></i>`;
+    }).join('');
+    el.querySelector('[data-dots]').title = `attempt ${s.attempts} of ${max}`;
+    el.querySelector('[data-cost]').textContent = '$' + (s.costUsd || 0).toFixed(2);
+    el.classList.toggle('sel', S.selected === t.id);
+    el.setAttribute('aria-label', `${t.title || t.id}: ${s.status}, attempt ${s.attempts} of ${max}`);
+  }
+  const active = Object.values(S.state.tasks).filter(t => ['running', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
+  $('floorSub').textContent = `${tasks.length} agents, ${active} active`;
+}
+
+function drawThreads() {
+  const svg = $('threads'), floor = $('floor');
+  if (!svg || !floor || !S.plan) return;
+  const fr = floor.getBoundingClientRect();
+  svg.setAttribute('width', floor.scrollWidth); svg.setAttribute('height', floor.scrollHeight);
+  const paths = [];
+  for (const t of S.plan.tasks) {
+    const to = $('desk-' + t.id);
+    for (const d of t.deps || []) {
+      const from = $('desk-' + d);
+      if (!from || !to) continue;
+      const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+      const horizontal = b.left - a.right > 10;
+      let p;
+      if (horizontal) {
+        const x1 = a.right - fr.left, y1 = a.top + a.height / 2 - fr.top, x2 = b.left - fr.left, y2 = b.top + b.height / 2 - fr.top;
+        const mx = (x1 + x2) / 2;
+        p = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+      } else {
+        const x1 = a.left + a.width / 2 - fr.left, y1 = a.bottom - fr.top, x2 = b.left + b.width / 2 - fr.left, y2 = b.top - fr.top;
+        const my = (y1 + y2) / 2;
+        p = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
+      }
+      const ts = S.state.tasks[t.id]?.status;
+      const cls = ['running', 'verifying', 'reviewing', 'merging'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' ? 'dim' : '';
+      paths.push(`<path d="${p}" stroke="${colorOf(d)}" class="${cls}"/>`);
+    }
+  }
+  svg.innerHTML = paths.join('');
+}
+
+function mergeOrder() {
+  const seen = new Map();
+  for (const e of S.events) {
+    if (e.type === 'merge' && e.ok) seen.set(e.task, e.ts);
+    if (e.type === 'merge_reverted') seen.delete(e.task);
+  }
+  return [...seen.entries()].filter(([id]) => S.state.tasks[id]?.status === 'done').map(([id, ts]) => ({ id, ts }));
+}
+
+function renderBraid() {
+  $('branch').textContent = S.state.integrationBranch || '';
+  const merged = mergeOrder();
+  const total = S.plan.tasks.length;
+  const seg = 46, top = 14;
+  const remaining = Math.max(0, total - merged.length);
+  const h = top + merged.length * seg + (remaining ? 40 : 10);
+  const W = 54, cx = 27;
+  // three strands; each merged segment takes its color on the lead strand and neighbors on the others
+  const strands = [0, 1, 2].map(k => {
+    let d = '';
+    const parts = [];
+    for (let i = 0; i < merged.length; i++) {
+      const y0 = top + i * seg;
+      const pts = [];
+      for (let s = 0; s <= 12; s++) {
+        const y = y0 + (s / 12) * seg;
+        const x = cx + Math.sin(((y - top) / seg) * Math.PI * 2 + k * (Math.PI * 2 / 3)) * 11;
+        pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      }
+      const col = colorOf(merged[(i + k) % merged.length]?.id || merged[i].id);
+      parts.push(`<polyline points="${pts.join(' ')}" stroke="${col}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
+    }
+    return parts.join('');
+  }).join('');
+  const tail = remaining ? `<line x1="${cx - 11}" y1="${top + merged.length * seg}" x2="${cx - 11}" y2="${h}" stroke="var(--line-2)" stroke-width="3" stroke-dasharray="3 5"/>
+    <line x1="${cx}" y1="${top + merged.length * seg}" x2="${cx}" y2="${h}" stroke="var(--line-2)" stroke-width="3" stroke-dasharray="3 5"/>
+    <line x1="${cx + 11}" y1="${top + merged.length * seg}" x2="${cx + 11}" y2="${h}" stroke="var(--line-2)" stroke-width="3" stroke-dasharray="3 5"/>` : '';
+  const knotTop = `<rect x="${cx - 14}" y="2" width="28" height="10" rx="3" fill="var(--line-2)"/>`;
+  const beadsSvg = merged.map((m, i) => {
+    const y = top + i * seg + seg / 2;
+    return `<rect x="${cx - 7}" y="${y - 7}" width="14" height="14" rx="3" fill="${colorOf(m.id)}" stroke="var(--panel)" stroke-width="2"/>`;
+  }).join('');
+  const labels = merged.map((m, i) => {
+    const y = top + i * seg + seg / 2;
+    const t = S.plan.tasks.find(x => x.id === m.id);
+    return `<div class="bead" style="top:${y}px"><b style="color:${colorOf(m.id)}">${esc(m.id)}</b><em style="font-style:normal;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t?.title || '')}</em><span>${esc((m.ts || '').slice(11, 16))}</span></div>`;
+  }).join('') + (remaining ? `<div class="bead" style="top:${top + merged.length * seg + 22}px;color:var(--muted)">${remaining} strand${remaining > 1 ? 's' : ''} to go</div>` : '');
+  $('braid').innerHTML = merged.length || remaining
+    ? `<div class="braid"><svg width="${W}" height="${h}" viewBox="0 0 ${W} ${h}" aria-hidden="true">${knotTop}${strands}${tail}${beadsSvg}</svg><div class="beads" style="height:${h}px">${labels}</div></div>`
+    : `<div class="braid-empty">Nothing merged yet.</div>`;
+}
+
+const EV_TEXT = {
+  run_start: (e) => [`Run started from ${e.base}`, ''],
+  run_end: (e) => [`Run ${e.status}, $${Number(e.costUsd || 0).toFixed(2)} spent`, e.status === 'done' ? 'ok' : 'err'],
+  task_status: (e) => [`${e.status}${e.error ? ': ' + String(e.error).split('\n')[0].slice(0, 90) : ''}`, e.status === 'done' ? 'ok' : e.status === 'failed' ? 'err' : ''],
+  verify: (e) => [`verify ${e.dir}: ${e.cmd} ${e.code === 0 ? 'passed' : 'failed (' + e.code + ')'}`, e.code === 0 ? '' : 'err'],
+  review: (e) => [e.approve ? 'review approved' : `review: ${(e.issues || []).join('; ').slice(0, 120)}`, e.approve ? 'ok' : 'err'],
+  merge: (e) => [e.ok ? 'merged into the braid' : 'merge conflict, redoing on latest', e.ok ? 'ok' : 'err'],
+  merge_reverted: () => ['merge rolled back: combined build failed', 'err'],
+};
+function renderFeed() {
+  const list = $('feed');
+  const items = S.events.slice(-150).reverse().map(e => {
+    const f = EV_TEXT[e.type];
+    if (!f) return '';
+    if (e.type === 'task_status' && ['verifying', 'merging'].includes(e.status)) return '';
+    const [text, cls] = f(e);
+    const who = e.task ? `<b style="color:${colorOf(e.task)}">${esc(e.task)}</b> ` : '';
+    const sw = `<span class="sw" style="background:${e.task ? colorOf(e.task) : 'var(--accent)'}"></span>`;
+    const li = `<li class="${cls} ${e._new ? 'new' : ''}">${sw}<span>${who}${esc(text)}</span><time>${esc((e.ts || '').slice(11, 19))}</time></li>`;
+    e._new = false;
+    return li;
+  }).join('');
+  list.innerHTML = items || '<li><span></span><span style="color:var(--muted)">Waiting for activity...</span></li>';
+  $('feedSub').textContent = `${S.events.length} events`;
+}
+
+/* ================= inspector ================= */
+registerSprite($('insSprite'), () => ({ color: colorOf(S.selected), mood: MOOD[S.state?.tasks[S.selected]?.status] || 'sleep' }));
+
+function openInspector(id) {
+  S.selected = id; S.logTab = null; S.logs = null;
+  $('inspector').classList.add('open'); $('scrim').classList.add('open');
+  $('inspector').setAttribute('aria-hidden', 'false');
+  renderInspector(true);
+  updateFloor();
+  clearInterval(S.logTimer);
+  const poll = async () => {
+    if (!S.selected) return;
+    try { S.logs = await getJSON(`/api/run/${S.runId}/task/${S.selected}/log`); } catch { S.logs = []; }
+    renderLogs();
+  };
+  poll();
+  S.logTimer = setInterval(() => {
+    const st = S.state?.tasks[S.selected]?.status;
+    if (st && !['done', 'failed', 'blocked', 'skipped'].includes(st)) poll();
+  }, 1500);
+  $('insClose').focus();
+}
+function closeInspector() {
+  S.selected = null; clearInterval(S.logTimer);
+  $('inspector').classList.remove('open'); $('scrim').classList.remove('open');
+  $('inspector').setAttribute('aria-hidden', 'true');
+  if (S.plan && S.state) updateFloor();
+}
+$('insClose').addEventListener('click', closeInspector);
+$('scrim').addEventListener('click', closeInspector);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInspector(); });
+
+function renderInspector(full) {
+  const id = S.selected;
+  const t = S.plan.tasks.find(x => x.id === id);
+  const s = S.state.tasks[id] || {};
+  $('insTitle').textContent = t.title || id;
+  $('insMeta').innerHTML = `<span class="chip ${s.status}">${esc(s.status)}</span>
+    <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono">$${(s.costUsd || 0).toFixed(2)}</span>
+    ${(t.deps || []).length ? `<span>needs ${t.deps.map(d => `<b style="color:${colorOf(d)}">${esc(d)}</b>`).join(', ')}</span>` : ''}`;
+  if (full || !$('insChecks')) {
+    $('insBody').innerHTML = `
+      <div class="ins-sec"><h4>Task</h4><div class="prompt">${esc(t.prompt)}</div></div>
+      <div class="ins-sec" id="insErrSec"></div>
+      <div class="ins-sec"><h4>Checks</h4><div class="checks" id="insChecks"></div></div>
+      <div class="ins-sec"><h4>Agent transcript</h4><div class="tabs" id="insTabs" role="tablist"></div><div class="tx" id="insTx"><div style="color:var(--muted)">Loading...</div></div></div>`;
+  }
+  $('insErrSec').innerHTML = s.error && s.status !== 'done' ? `<h4>Last problem</h4><div class="errbox mono">${esc(s.error)}</div>` : '';
+  const checks = S.events.filter(e => e.task === id && ['verify', 'review', 'merge', 'merge_reverted'].includes(e.type)).map(e => {
+    const [text, cls] = EV_TEXT[e.type](e);
+    return `<div><span class="chip ${cls === 'ok' ? 'done' : cls === 'err' ? 'failed' : ''}">${esc(e.type.replace('_', ' '))}</span><span>${esc(text)}</span><time class="mono" style="margin-left:auto;color:var(--faint);font-size:11px">${esc((e.ts || '').slice(11, 19))}</time></div>`;
+  });
+  $('insChecks').innerHTML = checks.join('') || '<div style="color:var(--muted)">No checks yet.</div>';
+}
+
+function renderLogs() {
+  const logs = S.logs || [];
+  const tabs = $('insTabs'), tx = $('insTx');
+  if (!tabs) return;
+  if (!logs.length) { tabs.innerHTML = ''; tx.innerHTML = '<div style="color:var(--muted)">No agent activity yet.</div>'; return; }
+  const key = (l) => `${l.role}-${l.attempt}`;
+  if (!S.logTab || !logs.some(l => key(l) === S.logTab)) S.logTab = key(logs[logs.length - 1]);
+  tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : 'Reviewer'} #${l.attempt}</button>`).join('');
+  tabs.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { S.logTab = b.dataset.k; renderLogs(); }));
+  const log = logs.find(l => key(l) === S.logTab);
+  const nearBottom = $('insBody').scrollHeight - $('insBody').scrollTop - $('insBody').clientHeight < 80;
+  tx.innerHTML = (log.truncated ? '<div style="color:var(--faint);font-size:12px">Earlier events trimmed.</div>' : '') + log.events.map(e => {
+    switch (e.kind) {
+      case 'text': return `<div class="msg">${esc(e.text)}</div>`;
+      case 'tool': return `<div class="tool"><b>${esc(e.name)}</b><code class="mono">${esc(summarizeInput(e.input))}</code></div>`;
+      case 'tool_result': return `<div class="res mono ${e.isError ? 'bad' : ''}">${esc(e.preview)}</div>`;
+      case 'result': return `<div class="result ${e.ok ? 'ok' : 'bad'}"><b>${e.ok ? 'Finished' : 'Ended with error'}</b>${e.costUsd ? ` - $${Number(e.costUsd).toFixed(2)}` : ''}\n${esc(String(e.text || '').slice(0, 1200))}</div>`;
+      default: return '';
+    }
+  }).join('');
+  if (nearBottom) $('insBody').scrollTop = $('insBody').scrollHeight;
+}
+function summarizeInput(i) {
+  if (i == null) return '';
+  if (typeof i === 'string') return i;
+  return i.file_path || i.path || i.pattern || i.command || i.url || JSON.stringify(i).slice(0, 140);
+}
+
+/* ================= chrome ================= */
+function tickElapsed() {
+  const st = S.state;
+  if (!st?.createdAt) { $('elapsedV').textContent = '-'; return; }
+  const end = st.endedAt ? new Date(st.endedAt) : new Date();
+  const s = Math.max(0, Math.round((end - new Date(st.createdAt)) / 1000));
+  $('elapsedV').textContent = s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+setInterval(tickElapsed, 1000);
+
+$('runPick').addEventListener('change', (e) => openRun(e.target.value));
+$('themeBtn').addEventListener('click', () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('braid-theme', root.dataset.theme); } catch {}
+});
+try { const th = localStorage.getItem('braid-theme'); if (th) document.documentElement.dataset.theme = th; } catch {}
+addEventListener('hashchange', () => {
+  const id = new URLSearchParams(location.hash.slice(1)).get('run');
+  if (id && id !== S.runId) openRun(id);
+});
+
+loadRuns();
+setInterval(loadRuns, 5000);
+})();
+</script>
+</body>
+</html>

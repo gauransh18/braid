@@ -32,6 +32,8 @@ export class Orchestrator {
   private state!: RunState;
   private integrationDir!: string;
   private mergeChain: Promise<unknown> = Promise.resolve();
+  private saveChain: Promise<void> = Promise.resolve();
+  private saveQueued = false;
 
   constructor(private readonly opts: OrchestratorOptions) {
     validatePlan(opts.plan);
@@ -42,6 +44,10 @@ export class Orchestrator {
     this.tasks = new Map(opts.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
   }
 
+  get repo(): string {
+    return this.opts.repo;
+  }
+
   private worktreeDir(name: string): string {
     return join(stateRoot(this.opts.repo), 'worktrees', this.runId, name);
   }
@@ -50,13 +56,21 @@ export class Orchestrator {
     return `braid/${this.runId}/${name}`;
   }
 
-  private async save(): Promise<void> {
-    await this.store.saveState(this.state);
+  /** Serialized, coalesced snapshot writes: concurrent callers share the next write. */
+  private save(): Promise<void> {
+    if (this.saveQueued) return this.saveChain;
+    this.saveQueued = true;
+    this.saveChain = this.saveChain.then(async () => {
+      this.saveQueued = false;
+      await this.store.saveState(this.state);
+    });
+    return this.saveChain;
   }
 
   private setStatus(t: TaskState, status: TaskStatus, extra: Partial<TaskState> = {}): void {
     Object.assign(t, extra, { status });
     this.store.event('task_status', { task: t.id, status, ...extra });
+    void this.save().catch(() => undefined);
   }
 
   async run(): Promise<RunState> {

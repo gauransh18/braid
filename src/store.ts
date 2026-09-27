@@ -49,7 +49,17 @@ export class RunStore {
   async saveState(state: RunState): Promise<void> {
     const tmp = join(this.dir, 'state.json.tmp');
     await writeFile(tmp, JSON.stringify(state, null, 2));
-    await rename(tmp, join(this.dir, 'state.json'));
+    // Windows refuses to replace a file another process has open (e.g. the watch server reading it).
+    for (let i = 0; ; i++) {
+      try {
+        await rename(tmp, join(this.dir, 'state.json'));
+        return;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (i >= 20 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw err;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
   }
 
   static async loadState(repo: string, runId: string): Promise<RunState> {

@@ -43,6 +43,7 @@ export interface PlanSpec {
 export type TaskStatus =
   | 'pending'
   | 'running'
+  | 'resolving'
   | 'verifying'
   | 'reviewing'
   | 'merging'

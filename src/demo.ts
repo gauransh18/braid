@@ -92,6 +92,22 @@ function script(): (o: DriverRunOptions) => MockStep {
       };
     }
 
+    if (/left conflict markers/.test(o.prompt)) {
+      const current = readFileSync(join(o.cwd, 'shared.txt'), 'utf8');
+      return {
+        delayMs: rand(2500, 4000),
+        costUsd: Number((cost / 3).toFixed(2)),
+        files: { 'shared.txt': current.split('\n').filter((l) => !/^(<{7}|={7}|>{7})/.test(l)).join('\n') },
+        events: [
+          { kind: 'text', text: 'Another worker merged first. Combining both sides in shared.txt.' },
+          { kind: 'tool', name: 'Read', input: { file_path: 'shared.txt' } },
+          { kind: 'tool', name: 'Edit', input: { file_path: 'shared.txt' } },
+          { kind: 'text', text: 'shared.txt: kept both entries, removed markers.' },
+        ],
+        text: 'Resolved conflicts.',
+      };
+    }
+
     const files: Record<string, string> = {};
     // auth writes a failing value on its first try so verification rejects it.
     files[`${task}.txt`] = task === 'auth' && n === 1 ? 'token=bad\n' : `${task} v${n}\n`;

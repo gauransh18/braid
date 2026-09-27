@@ -47,6 +47,12 @@ function printEvent(e: HarnessEvent): void {
     case 'merge':
       console.log(`${t} ${who} merge -> ${e.ok ? 'ok' : 'conflict'}`);
       break;
+    case 'sync':
+      console.log(`${t} ${who} pulled latest integration${(e.conflicts as string[]).length ? `: conflicts in ${(e.conflicts as string[]).join(', ')}` : ''}`);
+      break;
+    case 'resolve':
+      console.log(`${t} ${who} ${(e.leftover as string[]).length ? `markers remain in ${(e.leftover as string[]).join(', ')}` : 'conflicts resolved'}`);
+      break;
     case 'merge_reverted':
       console.log(`${t} ${who} merge reverted: combined tree failed verification`);
       break;

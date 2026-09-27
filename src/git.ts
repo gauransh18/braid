@@ -53,11 +53,11 @@ export class Git {
     return stdout.trim() ? [] : FALLBACK_IDENTITY;
   }
 
-  /** Stage and commit everything in a worktree. Returns false when there was nothing to commit. */
+  /** Stage and commit everything in a worktree (concluding an in-progress merge). Returns false when there was nothing to commit. */
   async commitAll(cwd: string, message: string): Promise<boolean> {
     await this.run(['add', '-A'], cwd);
     const { stdout } = await this.run(['status', '--porcelain'], cwd);
-    if (!stdout.trim()) return false;
+    if (!stdout.trim() && !(await this.inMerge(cwd))) return false;
     await this.run([...(await this.identityArgs(cwd)), 'commit', '-q', '-m', message], cwd);
     return true;
   }
@@ -79,6 +79,27 @@ export class Git {
     if (res.code === 0) return { ok: true, detail: res.stdout };
     await this.run(['merge', '--abort'], cwd, true);
     return { ok: false, detail: (res.stdout + res.stderr).trim() };
+  }
+
+  async inMerge(cwd: string): Promise<boolean> {
+    return (await this.run(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], cwd, true)).code === 0;
+  }
+
+  /**
+   * Merge `ref` into the branch checked out in `cwd`. On conflict the merge is left in
+   * progress (markers in the files) and the conflicted paths are returned.
+   */
+  async mergeIn(cwd: string, ref: string, message: string): Promise<{ conflicts: string[] }> {
+    const id = await this.identityArgs(cwd);
+    const res = await this.run([...id, 'merge', '--no-ff', '-m', message, ref], cwd, true);
+    if (res.code === 0) return { conflicts: [] };
+    const { stdout } = await this.run(['diff', '--name-only', '--diff-filter=U'], cwd);
+    const conflicts = stdout.split(/\r?\n/).filter(Boolean);
+    if (!conflicts.length) {
+      await this.run(['merge', '--abort'], cwd, true);
+      throw new Error(`merge of ${ref} failed without conflicts: ${(res.stdout + res.stderr).trim()}`);
+    }
+    return { conflicts };
   }
 
   /** Hard reset a harness-owned worktree (integration branch only). */

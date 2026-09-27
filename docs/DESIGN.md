@@ -34,8 +34,9 @@ plan.json ─► Orchestrator (code, deterministic)
                     ├─ commit
                     ├─ verify  (task worktree)            ── fail ─► retry with output as feedback
                     ├─ review  Driver.run(read-only)      ── reject ─► retry with issues as feedback
-                    └─ merge   (serialized)               ── conflict ─► fresh worktree, redo
-                         └─ verify again on the combined tree ── fail ─► roll back the merge, redo
+                    └─ merge   (serialized)               ── conflict ─► pull latest into task branch,
+                         │                                               resolver agent fixes markers only
+                         └─ verify again on the combined tree ── fail ─► roll back, pull latest, fix on top
 ```
 
 - `src/orchestrator.ts`: the scheduler, the task lifecycle, and serialized merges followed by verification.
@@ -70,7 +71,7 @@ containers (see the roadmap) for untrusted work.
 
 ## Roadmap
 
-1. **Cheaper conflict handling.** Today a merge conflict throws away the attempt and redoes it. Instead, merge the integration branch into the task branch and have the agent resolve the conflict markers. (In the smoke test, a conflict roughly doubled that task's cost.)
+1. ~~**Cheaper conflict handling.**~~ Shipped. On a merge conflict braid merges the newer integration work into the task branch, and a narrow resolver agent removes the markers while keeping both sides' changes. The task is not redone. Nothing is committed while markers remain. A combined-tree verify failure is fixed on top of the existing work the same way. In the real smoke run the resolver cost $0.09, versus about $0.21 for a full redo.
 2. **Resume.** Restart an interrupted run from `state.json`, reusing tasks that are already merged.
 3. ~~**Watch UI.**~~ Shipped as `braid watch`, `braid run --watch` and `braid demo`: a local read-only page (`ui/index.html`, `src/watch.ts`) that tails the run files over SSE.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.

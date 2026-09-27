@@ -3,7 +3,8 @@ import type { DriverRegistry } from './drivers/driver.js';
 import { Git } from './git.js';
 import { READ_ONLY_TOOLS, resolveTask, validatePlan, type ResolvedTask } from './plan.js';
 import { shell } from './proc.js';
-import { extractJson, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
+import { readFile } from 'node:fs/promises';
+import { conflictPrompt, extractJson, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
 import { newRunId, RunStore, stateRoot } from './store.js';
 import type { PlanSpec, RunState, TaskState, TaskStatus } from './types.js';
 
@@ -173,6 +174,9 @@ export class Orchestrator {
     const feedback: Feedback[] = [];
     let forkPoint = '';
     let fresh = true;
+    /** Files with unresolved conflict markers from merging newer integration work into this branch. */
+    let conflicts: string[] = [];
+    let leftover: string[] = [];
     s.startedAt = new Date().toISOString();
 
     try {
@@ -182,7 +186,7 @@ export class Orchestrator {
         s.attempts++;
         const attempt = s.attempts;
 
-        // (Re)create the worktree on top of the latest integration branch so deps' merged work is present.
+        // Create the worktree on top of the latest integration branch so deps' merged work is present.
         if (fresh) {
           await this.git.removeWorktree(dir);
           await this.git.deleteBranch(branch);
@@ -194,22 +198,35 @@ export class Orchestrator {
         }
         s.branch = branch;
 
-        this.setStatus(s, 'running', { error: undefined });
-        const log = this.store.agentLog(task.id, attempt, 'worker');
+        const resolving = conflicts.length > 0;
+        this.setStatus(s, resolving ? 'resolving' : 'running', { error: undefined });
         const work = await driver.run({
-          prompt: workerPrompt(this.plan, task, feedback),
+          prompt: resolving ? conflictPrompt(this.plan, task, conflicts, leftover) : workerPrompt(this.plan, task, feedback),
           cwd: dir,
           model: task.model,
           maxTurns: task.maxTurns,
           allowedTools: task.allowedTools,
           canEdit: true,
           signal: this.opts.signal,
-          onEvent: log,
+          onEvent: this.store.agentLog(task.id, attempt, resolving ? 'resolver' : 'worker'),
         });
         this.addCost(s, work.costUsd);
         s.sessionId = work.sessionId;
         s.summary = work.text.slice(0, 2000);
-        await this.git.commitAll(dir, `braid(${task.id}): attempt ${attempt}\n\n${task.title}`);
+
+        if (resolving) {
+          // Never commit a merge that still has markers; the next attempt finishes the job.
+          leftover = await filesWithMarkers(dir, conflicts);
+          this.store.event('resolve', { task: task.id, files: conflicts, leftover });
+          if (leftover.length || !work.ok) {
+            feedback.push({ attempt, reason: `Conflict resolution incomplete. Markers remain in: ${leftover.join(', ') || '(none)'}. ${work.ok ? '' : work.text.slice(0, 500)}` });
+            continue;
+          }
+          conflicts = [];
+          await this.git.commitAll(dir, `braid(${task.id}): resolve conflicts with integration\n\n${task.title}`);
+        } else {
+          await this.git.commitAll(dir, `braid(${task.id}): attempt ${attempt}\n\n${task.title}`);
+        }
 
         if (!work.ok) {
           feedback.push({ attempt, reason: `The agent run ended with an error: ${work.text.slice(0, 1500)}` });
@@ -236,7 +253,11 @@ export class Orchestrator {
         const merged = await this.serialMerge(task, branch);
         if (!merged.ok) {
           feedback.push({ attempt, reason: merged.reason });
-          fresh = true; // redo on top of the newer integration branch
+          // Keep the finished work: bring the newer integration state into this branch instead of redoing.
+          const sync = await this.syncWithIntegration(task, dir);
+          forkPoint = sync.head;
+          conflicts = sync.conflicts;
+          leftover = [];
           continue;
         }
 
@@ -294,19 +315,46 @@ export class Orchestrator {
       const m = await this.git.merge(this.integrationDir, branch, `braid: merge ${task.id} - ${task.title}`);
       this.store.event('merge', { task: task.id, ok: m.ok });
       if (!m.ok) {
-        return { ok: false, reason: `Your change conflicted with work other tasks merged first. The worktree was reset onto the latest merged state; redo the task on top of it.\n${tail(m.detail, 1500)}` };
+        return { ok: false, reason: `Your change conflicted with work other tasks merged first.\n${tail(m.detail, 1500)}` };
       }
       const v = await this.verify(task, this.integrationDir);
       if (!v.ok) {
         await this.git.resetHard(this.integrationDir, before);
         this.store.event('merge_reverted', { task: task.id });
-        return { ok: false, reason: `Your change passed on its own but broke verification once combined with other tasks' merged work. The worktree was reset onto the latest merged state; redo the task on top of it.\n${v.report}` };
+        return { ok: false, reason: `Your change passed on its own but broke verification once combined with other tasks' merged work, which is now in your worktree. Fix your change so the combined tree passes; do not redo the task.\n${v.report}` };
       }
       return { ok: true, reason: '' };
     });
     this.mergeChain = job.catch(() => undefined);
     return job;
   }
+
+  /**
+   * Merge the current integration head into a task branch. Serialized with merges so the
+   * head cannot move mid-read. Conflicts are left in the worktree for the resolver agent.
+   */
+  private syncWithIntegration(task: ResolvedTask, dir: string): Promise<{ head: string; conflicts: string[] }> {
+    const job = this.mergeChain.then(async () => {
+      const head = await this.git.revParse('HEAD', this.integrationDir);
+      const { conflicts } = await this.git.mergeIn(dir, head, `braid(${task.id}): merge latest integration`);
+      this.store.event('sync', { task: task.id, conflicts });
+      return { head, conflicts };
+    });
+    this.mergeChain = job.catch(() => undefined);
+    return job;
+  }
+}
+
+const MARKER_RE = /^(<{7}|>{7})(\s|$)|^={7}$/m;
+
+/** Conflicted files that still contain git conflict markers. Deleted files count as resolved. */
+async function filesWithMarkers(dir: string, files: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const f of files) {
+    const text = await readFile(join(dir, f), 'utf8').catch(() => '');
+    if (MARKER_RE.test(text)) out.push(f);
+  }
+  return out;
 }
 
 function tail(text: string, n = 4000): string {

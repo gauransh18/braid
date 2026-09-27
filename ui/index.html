@@ -148,7 +148,7 @@ svg.threads path.dim { opacity: .18; }
   font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; background: var(--line); color: var(--muted);
   text-transform: lowercase;
 }
-.chip.running, .chip.verifying, .chip.reviewing, .chip.merging { background: var(--info-soft); color: var(--info); }
+.chip.running, .chip.resolving, .chip.verifying, .chip.reviewing, .chip.merging { background: var(--info-soft); color: var(--info); }
 .chip.done { background: var(--ok-soft); color: var(--ok); }
 .chip.failed { background: var(--err-soft); color: var(--err); }
 .chip.blocked { background: var(--warn-soft); color: var(--warn); }
@@ -272,7 +272,7 @@ svg.threads path.dim { opacity: .18; }
 /* ================= palette + sprites ================= */
 const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
 const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
-const MOOD = { pending: 'sleep', running: 'work', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost' };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost' };
 
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
 function mix(h, target, amt) {
@@ -546,12 +546,14 @@ function knotSays() {
   if (st.status === 'done') return `All ${tasks.length} strands braided. Review ${st.integrationBranch} and merge it when you're happy.`;
   if (st.status === 'failed') return `Stopped with ${n('failed')} failed and ${n('blocked')} blocked. ${n('done')} strands still made it in.`;
   if (st.status === 'aborted') return 'Run stopped. Merged work is safe on the integration branch.';
-  const last = [...S.events].reverse().find(e => ['verify', 'review', 'merge', 'merge_reverted'].includes(e.type));
+  const last = [...S.events].reverse().find(e => ['verify', 'review', 'merge', 'merge_reverted', 'sync', 'resolve'].includes(e.type));
   if (last?.type === 'verify' && last.code !== 0) return `${last.task} failed \`${last.cmd}\`. Sending it back with the output.`;
   if (last?.type === 'review' && !last.approve) return `Reviewer bounced ${last.task}: ${(last.issues || [])[0] || 'changes requested'}.`;
-  if (last?.type === 'merge' && !last.ok) return `${last.task} tangled with another strand. Re-weaving on the latest braid.`;
+  if (last?.type === 'sync' && last.conflicts?.length) return `${last.task} tangled with another strand in ${last.conflicts.length} file${last.conflicts.length > 1 ? 's' : ''}. Untangling, keeping its work.`;
+  if (last?.type === 'resolve' && !last.leftover?.length) return `${last.task} untangled. Checking it again.`;
+  if (last?.type === 'merge' && !last.ok) return `${last.task} tangled with another strand. Pulling in the latest braid.`;
   if (last?.type === 'merge_reverted') return `${last.task} broke the combined build, so I unpicked it.`;
-  const busy = tasks.filter(t => ['running', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
+  const busy = tasks.filter(t => ['running', 'resolving', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
   return busy ? `Weaving ${busy} strand${busy > 1 ? 's' : ''}. ${n('done')} braided, ${n('pending')} waiting.` : 'Picking the next strands...';
 }
 
@@ -607,7 +609,7 @@ function updateFloor() {
     el.classList.toggle('sel', S.selected === t.id);
     el.setAttribute('aria-label', `${t.title || t.id}: ${s.status}, attempt ${s.attempts} of ${max}`);
   }
-  const active = Object.values(S.state.tasks).filter(t => ['running', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
+  const active = Object.values(S.state.tasks).filter(t => ['running', 'resolving', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
   $('floorSub').textContent = `${tasks.length} agents, ${active} active`;
 }
 
@@ -635,7 +637,7 @@ function drawThreads() {
         p = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
       }
       const ts = S.state.tasks[t.id]?.status;
-      const cls = ['running', 'verifying', 'reviewing', 'merging'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' ? 'dim' : '';
+      const cls = ['running', 'resolving', 'verifying', 'reviewing', 'merging'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' ? 'dim' : '';
       paths.push(`<path d="${p}" stroke="${colorOf(d)}" class="${cls}"/>`);
     }
   }
@@ -700,7 +702,9 @@ const EV_TEXT = {
   task_status: (e) => [`${e.status}${e.error ? ': ' + String(e.error).split('\n')[0].slice(0, 90) : ''}`, e.status === 'done' ? 'ok' : e.status === 'failed' ? 'err' : ''],
   verify: (e) => [`verify ${e.dir}: ${e.cmd} ${e.code === 0 ? 'passed' : 'failed (' + e.code + ')'}`, e.code === 0 ? '' : 'err'],
   review: (e) => [e.approve ? 'review approved' : `review: ${(e.issues || []).join('; ').slice(0, 120)}`, e.approve ? 'ok' : 'err'],
-  merge: (e) => [e.ok ? 'merged into the braid' : 'merge conflict, redoing on latest', e.ok ? 'ok' : 'err'],
+  merge: (e) => [e.ok ? 'merged into the braid' : 'merge conflict with newer work', e.ok ? 'ok' : 'err'],
+  sync: (e) => [e.conflicts?.length ? `pulled latest braid, conflicts in ${e.conflicts.join(', ')}` : 'pulled latest braid, no conflicts', e.conflicts?.length ? 'err' : ''],
+  resolve: (e) => [e.leftover?.length ? `markers still in ${e.leftover.join(', ')}` : `resolved ${e.files.join(', ')}`, e.leftover?.length ? 'err' : 'ok'],
   merge_reverted: () => ['merge rolled back: combined build failed', 'err'],
 };
 function renderFeed() {
@@ -768,7 +772,7 @@ function renderInspector(full) {
       <div class="ins-sec"><h4>Agent transcript</h4><div class="tabs" id="insTabs" role="tablist"></div><div class="tx" id="insTx"><div style="color:var(--muted)">Loading...</div></div></div>`;
   }
   $('insErrSec').innerHTML = s.error && s.status !== 'done' ? `<h4>Last problem</h4><div class="errbox mono">${esc(s.error)}</div>` : '';
-  const checks = S.events.filter(e => e.task === id && ['verify', 'review', 'merge', 'merge_reverted'].includes(e.type)).map(e => {
+  const checks = S.events.filter(e => e.task === id && ['verify', 'review', 'merge', 'merge_reverted', 'sync', 'resolve'].includes(e.type)).map(e => {
     const [text, cls] = EV_TEXT[e.type](e);
     return `<div><span class="chip ${cls === 'ok' ? 'done' : cls === 'err' ? 'failed' : ''}">${esc(e.type.replace('_', ' '))}</span><span>${esc(text)}</span><time class="mono" style="margin-left:auto;color:var(--faint);font-size:11px">${esc((e.ts || '').slice(11, 19))}</time></div>`;
   });
@@ -782,7 +786,7 @@ function renderLogs() {
   if (!logs.length) { tabs.innerHTML = ''; tx.innerHTML = '<div style="color:var(--muted)">No agent activity yet.</div>'; return; }
   const key = (l) => `${l.role}-${l.attempt}`;
   if (!S.logTab || !logs.some(l => key(l) === S.logTab)) S.logTab = key(logs[logs.length - 1]);
-  tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : 'Reviewer'} #${l.attempt}</button>`).join('');
+  tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : l.role === 'resolver' ? 'Resolver' : 'Reviewer'} #${l.attempt}</button>`).join('');
   tabs.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { S.logTab = b.dataset.k; renderLogs(); }));
   const log = logs.find(l => key(l) === S.logTab);
   const nearBottom = $('insBody').scrollHeight - $('insBody').scrollTop - $('insBody').clientHeight < 80;

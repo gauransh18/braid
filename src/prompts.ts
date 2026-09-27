@@ -31,6 +31,33 @@ export function workerPrompt(plan: PlanSpec, task: ResolvedTask, feedback: Feedb
   return parts.join('\n\n');
 }
 
+/**
+ * Narrow follow-up after a merge conflict: keep the agent's finished work and only
+ * reconcile it with what other tasks merged meanwhile. Much cheaper than a redo.
+ */
+export function conflictPrompt(plan: PlanSpec, task: ResolvedTask, files: string[], leftover: string[] = []): string {
+  return [
+    `You are one worker in a team of coding agents. Overall goal: ${plan.goal}`,
+    `Your task (${task.id}): ${task.title}`,
+    task.prompt,
+    'You already finished this task. Meanwhile other workers merged their own tasks, and the harness has merged that newer work into your branch. Git could not combine these files automatically and left conflict markers (<<<<<<<, =======, >>>>>>>) in them:',
+    files.map((f) => `- ${f}`).join('\n'),
+    leftover.length ? `Your previous resolution left markers in: ${leftover.join(', ')}. Finish those.` : '',
+    [
+      'Resolve every conflict:',
+      "- Keep BOTH sides' intent: your task's changes and the other workers' changes. Do not drop either unless they are truly incompatible.",
+      '- Remove every marker line. Touch only what the conflicts require; do not redo or refactor the task.',
+      '- Do not run git commands. The harness commits the merge.',
+      task.verify.length ? `- The result must pass: ${task.verify.map((c) => `\`${c}\``).join(', ')}` : '',
+      '- End with one line per file saying how you combined it.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function reviewerPrompt(plan: PlanSpec, task: ResolvedTask, diff: string): string {
   return [
     `You are a strict code reviewer. Overall goal: ${plan.goal}`,

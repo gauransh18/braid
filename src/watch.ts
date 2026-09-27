@@ -8,7 +8,7 @@ import { RunStore, stateRoot } from './store.js';
 const UI_PATH = fileURLToPath(new URL('../../ui/index.html', import.meta.url));
 const RUN_ID_RE = /^[0-9]{8}-[0-9]{6}-[a-z0-9]{2,8}$/;
 const TASK_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const LOG_FILE_RE = /^(worker|reviewer)-(\d+)\.jsonl$/;
+const LOG_FILE_RE = /^(worker|resolver|reviewer)-(\d+)\.jsonl$/;
 const POLL_MS = 400;
 
 export interface WatchServer {
@@ -112,7 +112,7 @@ async function taskLogs(dir: string) {
   const files = (await readdir(dir).catch(() => [] as string[]))
     .map((f) => ({ f, m: LOG_FILE_RE.exec(f) }))
     .filter((x): x is { f: string; m: RegExpExecArray } => !!x.m)
-    .sort((a, b) => Number(a.m[2]) - Number(b.m[2]) || (a.m[1] === 'worker' ? -1 : 1));
+    .sort((a, b) => Number(a.m[2]) - Number(b.m[2]) || (a.m[1] === 'reviewer' ? 1 : -1));
   return Promise.all(
     files.map(async ({ f, m }) => {
       const lines = (await readFile(join(dir, f), 'utf8')).split('\n').filter(Boolean);

@@ -36,6 +36,14 @@ async function makeRepo(): Promise<string> {
   return Git.toplevel(dir);
 }
 
+function isResolver(o: DriverRunOptions): boolean {
+  return /left conflict markers/.test(o.prompt);
+}
+
+function stripMarkers(text: string): string {
+  return text.split('\n').filter((l) => !/^(<{7}|={7}|>{7})/.test(l)).join('\n');
+}
+
 function taskOf(o: DriverRunOptions): string {
   return /Your task \(([a-z0-9-]+)\)/.exec(o.prompt)?.[1] ?? 'reviewer';
 }
@@ -134,9 +142,9 @@ describe('orchestrator', () => {
     assert.equal(state.tasks.b!.status, 'blocked');
   });
 
-  it('redoes a conflicting task on top of the latest merged state', async () => {
+  it('resolves a merge conflict in place instead of redoing the task', async () => {
     const repo = await makeRepo();
-    const { state } = await runPlan(
+    const { state, mock } = await runPlan(
       repo,
       {
         goal: 'g',
@@ -149,6 +157,7 @@ describe('orchestrator', () => {
       },
       (o) => {
         const current = readFileSync(join(o.cwd, 'shared.txt'), 'utf8');
+        if (isResolver(o)) return { files: { 'shared.txt': stripMarkers(current) } };
         return { files: { 'shared.txt': `${current}${taskOf(o)}\n` } };
       },
     );
@@ -156,7 +165,44 @@ describe('orchestrator', () => {
     const merged = await show(repo, state.integrationBranch, 'shared.txt');
     assert.match(merged, /x\n/);
     assert.match(merged, /y\n/);
+    assert.doesNotMatch(merged, /<<<<<<<|>>>>>>>|=======/);
+    // One worker run per task plus a single narrow resolver run; no full redo.
+    assert.equal(mock.calls.filter((c) => !isResolver(c)).length, 2);
+    const resolvers = mock.calls.filter(isResolver);
+    assert.equal(resolvers.length, 1);
+    assert.match(resolvers[0]!.prompt, /- shared\.txt/);
     assert.equal(state.tasks.x!.attempts + state.tasks.y!.attempts, 3);
+  });
+
+  it('never commits leftover markers and retries the resolution', async () => {
+    const repo = await makeRepo();
+    let resolverCalls = 0;
+    const { state, mock } = await runPlan(
+      repo,
+      {
+        goal: 'g',
+        driver: 'mock',
+        concurrency: 2,
+        maxAttempts: 3,
+        tasks: [
+          { id: 'x', title: 'X', prompt: 'p' },
+          { id: 'y', title: 'Y', prompt: 'p' },
+        ],
+      },
+      (o) => {
+        const current = readFileSync(join(o.cwd, 'shared.txt'), 'utf8');
+        if (isResolver(o)) {
+          resolverCalls++;
+          return resolverCalls === 1 ? { files: { 'shared.txt': current } } : { files: { 'shared.txt': stripMarkers(current) } };
+        }
+        return { files: { 'shared.txt': `${current}${taskOf(o)}\n` } };
+      },
+    );
+    assert.equal(state.status, 'done');
+    assert.equal(resolverCalls, 2);
+    assert.match(mock.calls.filter(isResolver)[1]!.prompt, /left markers in: shared\.txt/);
+    const log = (await exec('git', ['log', '-p', state.integrationBranch], { cwd: repo })).stdout;
+    assert.doesNotMatch(log, /^\+<<<<<<</m);
   });
 
   it('reverts a merge that breaks the combined tree', async () => {

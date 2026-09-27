@@ -1,0 +1,28 @@
+{
+  "goal": "Add input validation and error handling to the user API",
+  "concurrency": 2,
+  "budgetUsd": 5,
+  "setup": ["npm ci"],
+  "verify": ["npm test"],
+  "maxAttempts": 2,
+  "maxTurns": 40,
+  "tasks": [
+    {
+      "id": "schema",
+      "title": "Validation schemas",
+      "prompt": "Create src/validation/user.ts with schemas for create and update user payloads. Add unit tests in test/validation.test.ts. Done when both payload shapes are validated and tests cover valid and invalid input."
+    },
+    {
+      "id": "errors",
+      "title": "Error middleware",
+      "prompt": "Add src/middleware/errors.ts that maps thrown errors to JSON responses {error, code}. Add tests. Do not touch route files."
+    },
+    {
+      "id": "wire",
+      "title": "Wire validation into routes",
+      "prompt": "Use the schemas from src/validation/user.ts in src/routes/users.ts and register the error middleware from src/middleware/errors.ts. Return 400 on invalid input. Add route tests.",
+      "deps": ["schema", "errors"],
+      "review": true
+    }
+  ]
+}

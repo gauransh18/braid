@@ -43,6 +43,12 @@ describe('claude driver', () => {
     assert.ok(args[args.indexOf('--disallowedTools') + 1]!.includes('Write'));
     assert.equal(args[args.indexOf('--permission-mode') + 1], 'default');
   });
+
+  it('isolates agents from personal settings, plugins and MCP servers', () => {
+    const args = new ClaudeDriver('claude').buildArgs({ prompt: '', cwd: '.', allowedTools: [], canEdit: true });
+    assert.equal(args[args.indexOf('--setting-sources') + 1], 'project,local');
+    assert.ok(args.includes('--strict-mcp-config'));
+  });
 });
 
 describe('extractJson', () => {

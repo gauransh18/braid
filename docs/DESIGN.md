@@ -65,6 +65,7 @@ containers (see the roadmap) for untrusted work.
 
 - Commit plans to the repo (for example `plans/*.json`) so the team shares task graphs and verify commands.
 - Each person runs `braid` locally with their own CLI subscription.
+- Agents are isolated from personal setup: the Claude driver passes `--setting-sources project,local --strict-mcp-config`, so personal plugins, hooks, output styles and MCP servers never leak into a run. Only the repo's own `.claude/` settings and `CLAUDE.md` apply, so the same plan behaves the same on every machine.
 - The integration branch is an ordinary branch: push it and open a PR as usual.
 
 ## Roadmap

@@ -14,7 +14,9 @@ export class ClaudeDriver implements Driver {
   constructor(private readonly bin = process.env.BRAID_CLAUDE_BIN ?? 'claude') {}
 
   buildArgs(opts: DriverRunOptions): string[] {
-    const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+    // Ignore the operator's personal settings, plugins, hooks and MCP servers so a plan behaves
+    // the same on every teammate's machine. Repo settings and CLAUDE.md still apply; auth is untouched.
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'project,local', '--strict-mcp-config'];
     args.push('--permission-mode', opts.canEdit ? 'acceptEdits' : 'default');
     const allowed = opts.canEdit ? opts.allowedTools : opts.allowedTools.filter((t) => !WRITE_TOOLS.includes(t));
     if (allowed.length) args.push('--allowedTools', allowed.join(','));

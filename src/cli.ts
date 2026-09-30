@@ -30,7 +30,7 @@ Usage:
                                  live dashboard for this repo's runs; --control adds start/stop/resume
                                  buttons, guarded by a per-session token (BRAID_CONTROL_TOKEN or generated)
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
-  braid doctor                   check that git and an agent CLI are installed
+  braid doctor [--json]          check that git and an agent CLI are installed
   braid status [runId]
   braid runs
 
@@ -117,6 +117,7 @@ async function main(argv: string[]): Promise<number> {
       replan: { type: 'string' },
       sandbox: { type: 'string' },
       control: { type: 'boolean' },
+      json: { type: 'boolean' },
       budget: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
@@ -145,7 +146,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
 
   if (cmd === 'doctor') {
     const rows = await checkTools();
-    console.log(formatDoctor(rows));
+    console.log(values.json ? JSON.stringify(rows) : formatDoctor(rows));
     return doctorExitCode(rows);
   }
 

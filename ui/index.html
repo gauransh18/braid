@@ -114,6 +114,8 @@ button { font: inherit; color: inherit; }
 .btn.danger { color: var(--err); }
 .btn[disabled] { opacity: .5; cursor: default; }
 [hidden] { display: none !important; }
+/* The guided start has no run to show yet: keep the header to the logo and the theme toggle. */
+body.start-mode .run-meta > :not(#themeBtn), body.start-mode #bubble { display: none; }
 .composer { width: min(720px, 100%); margin: 0 auto; text-align: left; display: flex; flex-direction: column; gap: 14px; color: var(--text); }
 .composer h2 { margin: 0; font-size: 20px; }
 .composer .lede { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -344,6 +346,7 @@ svg.threads path.dim { opacity: .18; }
       <div style="display:flex;flex-direction:column;gap:14px">
         <h2 class="pixel">Review the plan</h2>
         <div data-f="summary"></div>
+        <p class="note" data-f="agentLine"></p>
         <details data-f="jsonBox"><summary>Edit the plan as JSON</summary><textarea class="code" data-f="json" spellcheck="false"></textarea></details>
         <div class="row">
           <label style="flex:0 0 200px">Spend cap (USD)<input type="number" min="0.01" step="0.5" value="5" data-f="budget"></label>
@@ -597,6 +600,7 @@ function renderEmpty() {
   const mode = CTL.on ? 'start' : 'cli';
   if ($('main').dataset.empty === mode) return;
   $('main').dataset.empty = mode;
+  document.body.classList.toggle('start-mode', mode === 'start');
   if (mode === 'start') {
     $('main').innerHTML = `<div class="empty start"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas><div id="startHost" style="width:100%"></div></div>`;
     mountComposer($('startHost')).focus();
@@ -633,6 +637,7 @@ function renderAll() {
   let main = $('layout');
   if (!main || main.dataset.run !== S.runId) {
     delete $('main').dataset.empty;
+    document.body.classList.remove('start-mode');
     $('main').innerHTML = `<div class="layout" id="layout" data-run="${esc(S.runId)}">
       <section class="panel" aria-label="Task floor">
         <div class="panel-h"><h2 class="pixel">The floor</h2><span class="sub" id="floorSub"></span></div>
@@ -1027,6 +1032,7 @@ function mountComposer(host, onStarted) {
   const act = (name) => q(`[data-a="${name}"]`);
   const step = (name) => q(`[data-step="${name}"]`);
   let plan = null;
+  let defaults = {};
 
   const show = (name) => { step('goal').hidden = name !== 'goal'; step('review').hidden = name !== 'review'; };
   const say = (which, text, ok) => { const el = f('err-' + which); el.textContent = text || ''; el.classList.toggle('ok', !!ok); };
@@ -1039,11 +1045,14 @@ function mountComposer(host, onStarted) {
       `${t.deps?.length ? `<div class="d">runs after: ${t.deps.map(esc2).join(', ')}</div>` : ''}</li>`).join('')}</ol>`;
     f('json').value = JSON.stringify(plan, null, 2);
     if (plan.budgetUsd) f('budget').value = plan.budgetUsd;
+    const agent = plan.driver || defaults.driver || 'claude';
+    const model = plan.model || defaults.models?.[agent];
+    f('agentLine').innerHTML = `Agent: <b style="color:var(--text)">${esc2(agent)}</b> &middot; model: <b style="color:var(--text)">${esc2(model || 'the CLI\'s default')}</b>. Change these in the Braid menu, under Settings (Cmd+,), or in the plan JSON below.`;
   }
   function review(p) { plan = p; renderSummary(); say('review', ''); show('review'); }
 
   // Environment: suggested check command, saved plans, and whether an agent CLI exists.
-  api('GET', '/api/status').then((st) => { if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
+  api('GET', '/api/status').then((st) => { defaults = st.defaults || {}; if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
   api('GET', '/api/plans').then((names) => { f('saved').innerHTML = '<option value="">Load a saved plan...</option>' + names.map((n) => `<option>${esc2(n)}</option>`).join(''); if (!names.length) { f('saved').hidden = true; f('saved').nextElementSibling.hidden = true; } }).catch(() => {});
   api('GET', '/api/doctor').then((tools) => {
     const agents = tools.filter((t) => ['claude', 'codex', 'gemini'].includes(t.name));

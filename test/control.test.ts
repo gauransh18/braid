@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -86,7 +86,12 @@ describe('control endpoints', () => {
   before(async () => {
     repo = await makeRepo();
     script = () => ({ files: { 'a.txt': 'a\n' } });
-    server = await startWatch(repo, 0, { token: TOKEN, drivers: () => new DriverRegistry().register(new MockDriver((o) => script(o))) });
+    // "claude" is registered too (as another mock) so plans can name it without spending anything.
+    const registry = () =>
+      new DriverRegistry()
+        .register(new MockDriver((o) => script(o)))
+        .register(Object.assign(new MockDriver((o) => script(o)), { name: 'claude' }));
+    server = await startWatch(repo, 0, { token: TOKEN, drivers: registry });
     readOnly = await startWatch(repo, 0);
   });
   after(async () => {
@@ -201,5 +206,68 @@ describe('control endpoints', () => {
     assert.equal((await authed(server, 'GET', '/api/plans/rate-limit.json')).json.goal, 'g');
     assert.equal((await authed(server, 'GET', '/api/plans/notes.txt')).status, 404);
     assert.equal((await authed(server, 'GET', '/api/plans/..%2Fpackage.json')).status, 404);
+  });
+
+  describe('settings from the desktop app', () => {
+    const settings = (body: unknown) => authed(server, 'POST', '/api/settings', body);
+    const storedPlan = (runId: string) => JSON.parse(readFileSync(join(repo, '.braid', 'runs', runId, 'plan.json'), 'utf8')) as PlanSpec;
+
+    it('requires the token and refuses keys it does not manage', async () => {
+      assert.equal((await call(server, 'POST', '/api/settings', { env: {} })).status, 401);
+      const bad = await settings({ env: { PATH: '/tmp/evil' } });
+      assert.equal(bad.status, 400);
+      assert.match(bad.json.error, /not a provider key/);
+      assert.equal((await settings({ defaults: { driver: 'no-such-agent' } })).status, 400);
+    });
+
+    it('puts provider keys in the environment and restores what was there before', async () => {
+      const before = process.env.OPENAI_API_KEY;
+      process.env.OPENAI_API_KEY = 'from-the-shell';
+      try {
+        assert.equal((await settings({ env: { OPENAI_API_KEY: 'dummy-key-for-test' } })).status, 200);
+        assert.equal(process.env.OPENAI_API_KEY, 'dummy-key-for-test');
+        assert.equal((await settings({ env: { OPENAI_API_KEY: null } })).status, 200);
+        assert.equal(process.env.OPENAI_API_KEY, 'from-the-shell', 'removing the setting brings back the shell value');
+        // With nothing underneath, removal deletes.
+        delete process.env.OPENAI_API_KEY;
+        await settings({ env: { OPENAI_API_KEY: 'dummy-key-for-test' } });
+        await settings({ env: { OPENAI_API_KEY: null } });
+        assert.equal(process.env.OPENAI_API_KEY, undefined);
+      } finally {
+        if (before === undefined) delete process.env.OPENAI_API_KEY;
+        else process.env.OPENAI_API_KEY = before;
+      }
+    });
+
+    it('refuses a plan that names an agent braid does not have, before starting anything', async () => {
+      const res = await authed(server, 'POST', '/api/runs', { plan: { goal: 'g', budgetUsd: 1, tasks: [{ id: 'a', title: 'A', prompt: 'p', driver: 'nonexistent-agent' }] } });
+      assert.equal(res.status, 400);
+      assert.match(res.json.error, /unknown driver "nonexistent-agent"/);
+      assert.equal((await authed(server, 'GET', '/api/status')).json.active, null, 'nothing was left running');
+      const before = (await call(server, 'GET', '/api/runs')).json.length;
+      await authed(server, 'POST', '/api/runs', { plan: { goal: 'g', budgetUsd: 1, tasks: [{ id: 'a', title: 'A', prompt: 'p', driver: 'nonexistent-agent' }] } });
+      assert.equal((await call(server, 'GET', '/api/runs')).json.length, before, 'no empty run folder is left behind');
+    });
+
+    it('applies the default agent and model to plans that do not choose, and reports them', async () => {
+      script = () => ({ files: { 'a.txt': 'a\n' } });
+      assert.equal((await settings({ defaults: { driver: 'mock', models: { mock: 'mock-model-1', claude: 'sonnet', codex: '' } } })).status, 200);
+      assert.deepEqual((await authed(server, 'GET', '/api/status')).json.defaults, { driver: 'mock', models: { mock: 'mock-model-1', claude: 'sonnet' } });
+
+      const open: PlanSpec = { goal: 'g', budgetUsd: 2, tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p', driver: 'claude' }] };
+      const res = await authed(server, 'POST', '/api/runs', { plan: open });
+      assert.equal(res.status, 202);
+      const plan = storedPlan(res.json.runId);
+      assert.equal(plan.driver, 'mock');
+      assert.equal(plan.model, 'mock-model-1');
+      assert.equal(plan.tasks[1]!.model, 'sonnet', 'a task on another agent gets that agent\'s model, not the plan\'s');
+      await finished(res.json.runId);
+
+      // A plan that chooses for itself is left alone.
+      const own = await authed(server, 'POST', '/api/runs', { plan: { ...open, driver: 'mock', model: 'mine', tasks: [open.tasks[0]] } });
+      assert.equal(storedPlan(own.json.runId).model, 'mine');
+      await finished(own.json.runId);
+      await settings({ defaults: {} });
+    });
   });
 });

@@ -19,12 +19,31 @@ export class HttpError extends Error {
 
 const START_TIMEOUT_MS = 30_000;
 
+/** Provider keys the desktop app's Settings may hand to this process. Anything else is refused. */
+export const KEY_ENV_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'] as const;
+
+/** What a plan uses when it does not choose for itself. */
+export interface AgentDefaults {
+  driver?: string;
+  /** Model per driver; a missing or empty entry means the CLI's own default. */
+  models?: Record<string, string>;
+}
+
+export interface SettingsInput {
+  /** Provider keys by variable name. A string sets it, null removes what Settings set. */
+  env?: Record<string, string | null>;
+  defaults?: AgentDefaults;
+}
+
 /**
  * Starts, stops and resumes runs inside the watch server's process, one at a time. Only reachable
  * through the token-guarded control endpoints.
  */
 export class RunManager {
   private active?: { runId: string; ac: AbortController };
+  private defaults: AgentDefaults = {};
+  /** Environment values as they were before Settings overrode them, so removing a key restores them. */
+  private originalEnv = new Map<string, string | undefined>();
 
   constructor(
     private readonly repo: string,
@@ -33,6 +52,56 @@ export class RunManager {
 
   get activeRunId(): string | null {
     return this.active?.runId ?? null;
+  }
+
+  get agentDefaults(): AgentDefaults {
+    return this.defaults;
+  }
+
+  /**
+   * Apply what the desktop app's Settings window pushed: provider keys go into this process's environment (only
+   * this dedicated process, so every agent it spawns from now on inherits them) and the default agent and models
+   * are remembered for plans that do not name their own.
+   */
+  applySettings(input: SettingsInput): void {
+    const env = input.env ?? {};
+    for (const name of Object.keys(env)) {
+      if (!(KEY_ENV_NAMES as readonly string[]).includes(name)) throw new HttpError(400, `${name} is not a provider key braid manages`);
+    }
+    const d = input.defaults;
+    if (d?.driver) {
+      try {
+        this.drivers().get(d.driver);
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+    }
+    for (const [name, value] of Object.entries(env)) {
+      if (typeof value === 'string' && value.length > 0) {
+        if (!this.originalEnv.has(name)) this.originalEnv.set(name, process.env[name]);
+        process.env[name] = value;
+      } else if (this.originalEnv.has(name)) {
+        const original = this.originalEnv.get(name);
+        if (original === undefined) delete process.env[name];
+        else process.env[name] = original;
+        this.originalEnv.delete(name);
+      }
+    }
+    if (d) this.defaults = { driver: d.driver || undefined, models: Object.fromEntries(Object.entries(d.models ?? {}).filter(([, m]) => m)) };
+  }
+
+  /** A copy of `plan` with the default agent and model filled in wherever it left them open. */
+  private withDefaults(plan: PlanSpec): PlanSpec {
+    const d = this.defaults;
+    const out = structuredClone(plan);
+    if (!out.driver && d.driver) out.driver = d.driver;
+    const main = out.driver ?? 'claude';
+    if (!out.model && d.models?.[main]) out.model = d.models[main];
+    for (const t of out.tasks ?? []) {
+      // A task on a different agent than the plan's would otherwise inherit the wrong agent's model.
+      if (t.driver && t.driver !== main && !t.model && d.models?.[t.driver]) t.model = d.models[t.driver];
+    }
+    return out;
   }
 
   /** Every run started from a window must have a spend cap: nobody is watching a terminal to press Ctrl-C. */
@@ -47,7 +116,9 @@ export class RunManager {
     }
   }
 
-  async start(plan: PlanSpec, resumeId?: string): Promise<{ runId: string }> {
+  async start(given: PlanSpec, resumeId?: string): Promise<{ runId: string }> {
+    // A resumed run keeps the agent and model it started with; the stored plan already has them.
+    const plan = resumeId ? given : this.withDefaults(given);
     this.checkPlan(plan);
     if (this.active) throw new HttpError(409, `run ${this.active.runId} is still active`);
 
@@ -110,10 +181,11 @@ export class RunManager {
     this.active.ac.abort();
   }
 
-  async draft(goal: string, verify: string[], driver = 'claude'): Promise<{ plan: PlanSpec; costUsd: number }> {
+  async draft(goal: string, verify: string[], requested?: string): Promise<{ plan: PlanSpec; costUsd: number }> {
     if (!goal.trim()) throw new HttpError(400, 'goal is required');
+    const driver = requested ?? this.defaults.driver ?? 'claude';
     try {
-      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify });
+      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model: this.defaults.models?.[driver] });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }

@@ -56,7 +56,7 @@ a list of recent repositories. Picking one opens a dashboard window for it, with
 running in the background as that repository's server. **File > Open Repository...** (Cmd+O) switches the current window
 to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories
 at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu.
-`Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
+**Braid > Settings...** (Cmd+,) manages the agents: which of Claude Code, Codex and Gemini CLI are installed (with install commands for the ones that are not), which is the default, which model each uses (a preset list or any name you type), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
 the last window hides to the menu bar, whose icon shows how many runs are active (**Quit Braid** really quits). macOS
 notifications announce a finished, failed or stopped run and each task that fails, but only while no window is focused (the
 first launch asks for notification permission). Needs Rust, Bun and the Tauri CLI

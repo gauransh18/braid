@@ -121,7 +121,7 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
   const { runs } = control;
 
   if (parts[1] === 'status' && req.method === 'GET') {
-    return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo) });
+    return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo), defaults: runs.agentDefaults });
   }
   if (parts[1] === 'doctor' && req.method === 'GET') return send(res, 200, await checkTools());
 
@@ -139,6 +139,11 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
 
   if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
 
+  if (parts[1] === 'settings' && parts.length === 2) {
+    const body = await readBody(req);
+    runs.applySettings({ env: body.env && typeof body.env === 'object' ? body.env : undefined, defaults: body.defaults && typeof body.defaults === 'object' ? body.defaults : undefined });
+    return send(res, 200, { ok: true });
+  }
   if (parts[1] === 'plan-draft' && parts.length === 2) {
     const body = await readBody(req);
     const verify = Array.isArray(body.verify) ? body.verify.map(String) : [];
@@ -170,7 +175,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (parts[0] === 'api' && parts[1] === 'config' && req.method === 'GET') return send(res, 200, { control: !!control });
-  const writes = ['status', 'plans', 'plan-draft', 'doctor'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
+  const writes = ['status', 'plans', 'plan-draft', 'doctor', 'settings'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
   if (parts[0] === 'api' && writes) {
     if (!control) return send(res, 405, { error: 'read-only' });
     return handleControl(repo, req, res, parts, control);

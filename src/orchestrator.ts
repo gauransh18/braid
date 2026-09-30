@@ -51,10 +51,12 @@ export class Orchestrator {
     // The run rewrites its own copy when it replans; the caller's plan object is left alone.
     this.plan = structuredClone(opts.plan);
     if (opts.resume && !opts.runId) throw new Error('resume needs a runId');
+    this.tasks = new Map(this.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
+    // Fail before any work starts (and before a run folder exists) if a task names an agent braid does not have.
+    for (const t of this.tasks.values()) opts.drivers.get(t.driver);
     this.runId = opts.runId ?? newRunId();
     this.git = new Git(opts.repo);
     this.store = new RunStore(opts.repo, this.runId);
-    this.tasks = new Map(this.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
   }
 
   get repo(): string {

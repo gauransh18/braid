@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Braid Settings</title>
+<style>
+  :root {
+    --bg: #f6f1e7; --panel: #fffdf8; --line: #e2d8c6; --line-2: #d3c7b1; --text: #26222e; --muted: #6f6a78;
+    --accent: #7c4dff; --accent-ink: #fff; --accent-soft: #ece4ff; --ok: #1f9d63; --ok-soft: #ddf3e8; --warn: #b7791f; --err: #d64545; --hover: #f1eadb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12131c; --panel: #1d1f2d; --line: #2c2f44; --line-2: #3a3e58; --text: #ecebf5; --muted: #9a9cb3;
+            --accent: #b48cff; --accent-ink: #1a1230; --accent-soft: #2c2448; --ok: #3fcf8e; --ok-soft: #173327; --warn: #f5b942; --err: #ff6b6b; --hover: #262a3e; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; padding: 26px 28px 40px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  h1 { margin: 0; font-size: 22px; }
+  .lede { color: var(--muted); margin: 4px 0 18px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .btn { border: 1px solid var(--line-2); background: var(--panel); border-radius: 8px; padding: 6px 12px; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.danger { color: var(--err); }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+  .card.default { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .top h2 { margin: 0; font-size: 16px; }
+  .prov { color: var(--muted); font-size: 12px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); }
+  .pill.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+  .spacer { flex: 1; }
+  .radio { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+  .field { margin-top: 14px; }
+  .field > label, .field > .lab { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, input[type=text], input[type=password] { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; }
+  select { min-width: 240px; }
+  input[type=text], input[type=password] { flex: 1 1 240px; min-width: 0; font-family: ui-monospace, Menlo, monospace; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .saved { color: var(--ok); font-size: 13px; }
+  code { font-family: ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 12px; user-select: all; }
+  .install { margin-top: 12px; padding: 10px 12px; background: var(--bg); border: 1px dashed var(--line-2); border-radius: 8px; font-size: 13px; }
+  #msg { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 80vw; }
+  #msg.show { opacity: 1; }
+  #msg.bad { background: var(--err); color: #fff; }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <header><h1>Settings</h1><button class="btn" id="recheck">Recheck agents</button></header>
+  <p class="lede">The coding agents braid can use on this machine, which one runs by default, and which model each uses. These apply to new runs in every window.</p>
+  <div id="cards"></div>
+  <p class="foot">Runs already in progress keep the agent and model they started with. Not seeing a model? Choose <b>Custom...</b> and type its name exactly as the provider spells it. More providers (OpenCode, local models) are planned.</p>
+  <div id="msg" role="status"></div>
+
+<script>
+  const invoke = window.__TAURI__?.core?.invoke;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const AGENTS = [
+    { id: 'claude', name: 'Claude Code', provider: 'Anthropic', install: 'npm install -g @anthropic-ai/claude-code',
+      key: 'Anthropic API key',
+      keyHint: 'Leave empty to use your Claude sign-in (run claude once in a terminal). A key bills the Anthropic API instead of a Claude subscription.',
+      models: [['', 'CLI default'], ['opus', 'Opus (latest)'], ['sonnet', 'Sonnet (latest)'], ['haiku', 'Haiku (latest)'], ['claude-fable-5-1', 'Fable 5.1'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-4-5-20251001', 'Haiku 4.5']] },
+    { id: 'codex', name: 'Codex', provider: 'OpenAI', install: 'npm install -g @openai/codex',
+      key: 'OpenAI API key',
+      keyHint: 'Leave empty to use your ChatGPT sign-in (run codex login in a terminal). A key bills the OpenAI API instead of a ChatGPT plan.',
+      models: [['', 'CLI default'], ['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex'], ['gpt-5-codex', 'GPT-5 Codex'], ['codex-mini', 'Codex mini']] },
+    { id: 'gemini', name: 'Gemini CLI', provider: 'Google', install: 'npm install -g @google/gemini-cli',
+      key: 'Gemini API key',
+      keyHint: 'Leave empty to use the CLI\'s own Google sign-in. A key from Google AI Studio works when that sign-in is not available to you.',
+      models: [['', 'CLI default'], ['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite']] },
+  ];
+
+  let state = { default_agent: null, models: {}, key_set: {} };
+  let status = {}; // agent id -> { ok, version, install }
+
+  let toastTimer;
+  function toast(text, bad) {
+    const m = $('msg'); m.textContent = text; m.classList.toggle('bad', !!bad); m.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => m.classList.remove('show'), bad ? 4500 : 1600);
+  }
+  const call = (cmd, args) => invoke(cmd, args);
+
+  function collectModels() {
+    const models = {};
+    for (const a of AGENTS) {
+      const sel = document.querySelector(`[data-model="${a.id}"]`);
+      if (!sel) continue;
+      const value = sel.value === '__custom' ? document.querySelector(`[data-custom="${a.id}"]`).value.trim() : sel.value;
+      if (value) models[a.id] = value;
+    }
+    return models;
+  }
+  async function saveChoices() {
+    try {
+      const models = collectModels();
+      await call('settings_save', { defaultAgent: state.default_agent, models });
+      state.models = models;
+      toast('Saved');
+    } catch (e) { toast(String(e), true); }
+  }
+
+  function render() {
+    $('cards').innerHTML = AGENTS.map((a) => {
+      const s = status[a.id];
+      const installed = s?.ok;
+      const current = state.models[a.id] || '';
+      const known = a.models.some(([v]) => v === current);
+      const isDefault = state.default_agent === a.id;
+      const keyOn = !!state.key_set[a.id];
+      return `<section class="card ${isDefault ? 'default' : ''}" data-agent="${a.id}">
+        <div class="top">
+          <h2>${esc(a.name)}</h2><span class="prov">${esc(a.provider)}</span>
+          <span class="pill ${installed ? 'ok' : ''}">${s === undefined ? 'checking...' : installed ? `&#10003; installed${s.version ? ' · ' + esc(s.version) : ''}` : '&#10007; not found'}</span>
+          <span class="spacer"></span>
+          <label class="radio"><input type="radio" name="def" value="${a.id}" ${isDefault ? 'checked' : ''}> Default agent</label>
+        </div>
+        ${s !== undefined && !installed ? `<div class="install">Not installed on this machine. Install it with <code>${esc(a.install)}</code>, sign in once in a terminal, then click <b>Recheck agents</b>.
+          <button class="btn" data-copy="${esc(a.install)}">Copy command</button></div>` : ''}
+        <div class="field"><label for="m-${a.id}">Model</label>
+          <div class="row">
+            <select id="m-${a.id}" data-model="${a.id}">
+              ${a.models.map(([v, label]) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(label)}${v ? ' (' + esc(v) + ')' : ''}</option>`).join('')}
+              <option value="__custom" ${current && !known ? 'selected' : ''}>Custom...</option>
+            </select>
+            <input type="text" data-custom="${a.id}" placeholder="model name" value="${current && !known ? esc(current) : ''}" ${current && !known ? '' : 'hidden'} autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="field"><span class="lab">${esc(a.key)}</span>
+          ${keyOn ? `<div class="row"><span class="saved">&#10003; Saved in your keychain</span><button class="btn danger" data-clear="${a.id}">Remove</button></div>` :
+            `<div class="row"><input type="password" data-key="${a.id}" placeholder="Paste a key (optional)" autocomplete="off" spellcheck="false"><button class="btn" data-setkey="${a.id}">Save to keychain</button></div>`}
+          <div class="hint">${esc(a.keyHint)}</div>
+        </div>
+      </section>`;
+    }).join('');
+  }
+
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.name === 'def') { state.default_agent = t.value; render(); saveChoices(); return; }
+    if (t.matches('[data-model]')) {
+      const custom = document.querySelector(`[data-custom="${t.dataset.model}"]`);
+      custom.hidden = t.value !== '__custom';
+      if (t.value === '__custom') custom.focus(); else saveChoices();
+    }
+    if (t.matches('[data-custom]')) saveChoices();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches('[data-custom]')) saveChoices();
+    if (e.key === 'Enter' && e.target.matches('[data-key]')) document.querySelector(`[data-setkey="${e.target.dataset.key}"]`).click();
+  });
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.copy) { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Select the command and copy it', true); } }
+    if (b.dataset.setkey) {
+      const id = b.dataset.setkey; const input = document.querySelector(`[data-key="${id}"]`);
+      const value = input.value; input.value = ''; // never leave the key sitting in the page
+      try { await call('settings_set_key', { agent: id, value }); state.key_set[id] = true; render(); toast('Key saved to your keychain'); }
+      catch (err) { toast(String(err), true); }
+    }
+    if (b.dataset.clear) {
+      const id = b.dataset.clear;
+      try { await call('settings_clear_key', { agent: id }); state.key_set[id] = false; render(); toast('Key removed'); }
+      catch (err) { toast(String(err), true); }
+    }
+  });
+
+  async function recheck() {
+    status = {}; render();
+    $('recheck').disabled = true;
+    try {
+      const rows = await call('settings_agents');
+      for (const r of rows) status[r.name] = r;
+      for (const a of AGENTS) status[a.id] ??= { ok: false };
+    } catch (e) { toast('Could not check agents: ' + e, true); for (const a of AGENTS) status[a.id] = { ok: false }; }
+    $('recheck').disabled = false; render();
+  }
+  $('recheck').addEventListener('click', recheck);
+
+  (async () => {
+    if (!invoke) { $('cards').textContent = 'This page only works inside the Braid app.'; return; }
+    state = await call('settings_get');
+    state.models ||= {}; state.key_set ||= {};
+    render();
+    recheck();
+  })();
+</script>
+</body>
+</html>

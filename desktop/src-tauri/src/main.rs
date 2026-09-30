@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -25,6 +25,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 mod monitor;
+mod settings;
 #[cfg(target_os = "macos")]
 mod dock;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
@@ -34,6 +35,30 @@ use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt}
 struct Session {
     child: Option<CommandChild>,
     repo: Option<PathBuf>,
+    /// Port and token of a `watch --control` server, so settings can be pushed to it.
+    control: Option<(u16, String)>,
+}
+
+/// Settings and key presence, read once (keychain reads can prompt) and refreshed when Settings changes something.
+struct SettingsCache(Mutex<Option<settings::Snapshot>>);
+
+fn snapshot(app: &AppHandle) -> settings::Snapshot {
+    let state = app.state::<SettingsCache>();
+    let mut cached = state.0.lock().unwrap();
+    cached.get_or_insert_with(|| settings::snapshot(&settings::load(app))).clone()
+}
+
+/// Re-read settings and keys, then hand the result to every open dashboard's server.
+fn refresh_and_push(app: &AppHandle) {
+    let fresh = settings::snapshot(&settings::load(app));
+    *app.state::<SettingsCache>().0.lock().unwrap() = Some(fresh.clone());
+    push_to_sessions(app, &fresh.payload);
+}
+
+/// The user's real PATH (GUI apps do not get it), worked out once.
+fn user_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(settings::user_path)
 }
 
 /// Sessions by window label. Closing a window ends its session.
@@ -49,6 +74,7 @@ struct TrayState {
 }
 
 const LAUNCHER: &str = "launcher";
+const SETTINGS: &str = "settings";
 const MAX_RECENT: usize = 8;
 
 fn recent_file(app: &AppHandle) -> Option<PathBuf> {
@@ -102,7 +128,7 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
 /// Start a braid server (`watch` or `demo`) and wait until it answers. Returns its port.
 fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str>) -> Result<(u16, CommandChild), String> {
     let port = free_port()?;
-    let mut command = app.shell().sidecar("braid").map_err(|e| e.to_string())?;
+    let mut command = app.shell().sidecar("braid").map_err(|e| e.to_string())?.env("PATH", user_path());
     // The token goes in the environment, not argv, so it does not show up in `ps`.
     if let Some(token) = token {
         command = command.env("BRAID_CONTROL_TOKEN", token);
@@ -143,7 +169,15 @@ fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str
 
 /// Show a running server in a window: reuse `existing`, or create a dashboard window that opens straight on it
 /// (so there is never an empty window while the server starts). Returns the window's label.
-fn present(app: &AppHandle, existing: Option<&str>, child: CommandChild, repo: Option<&Path>, url: Url, title: &str) -> Result<String, String> {
+fn present(
+    app: &AppHandle,
+    existing: Option<&str>,
+    child: CommandChild,
+    repo: Option<&Path>,
+    control: Option<(u16, String)>,
+    url: Url,
+    title: &str,
+) -> Result<String, String> {
     let window = match existing.and_then(|l| app.get_webview_window(l)) {
         Some(w) => {
             // Replace that window's previous server.
@@ -180,6 +214,7 @@ fn present(app: &AppHandle, existing: Option<&str>, child: CommandChild, repo: O
         let session = sessions.entry(label.clone()).or_default();
         session.child = Some(child);
         session.repo = repo.map(Path::to_path_buf);
+        session.control = control;
     }
     let _ = window.show();
     let _ = window.set_focus();
@@ -191,10 +226,14 @@ fn open_repo(app: &AppHandle, existing: Option<&str>, repo: &Path) -> Result<Str
     let token = session_token()?;
     let args = vec!["watch".to_string(), "--control".to_string()];
     let (port, child) = start_server(app, &args, repo, Some(&token))?;
+    // Before the window shows it: default agent, models and keys, so the very first run already uses them.
+    if let Err(why) = settings::push(port, &token, &snapshot(app).payload) {
+        eprintln!("braid: could not push settings: {why}");
+    }
     // The token rides in the URL fragment, which is never sent to the server or written to logs.
     let url = Url::parse(&format!("http://127.0.0.1:{port}/#token={token}")).map_err(|e| e.to_string())?;
     let name = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let label = present(app, existing, child, Some(repo), url, &format!("braid - {name}"))?;
+    let label = present(app, existing, child, Some(repo), Some((port, token.clone())), url, &format!("braid - {name}"))?;
     remember_repo(app, repo);
     Ok(label)
 }
@@ -204,15 +243,15 @@ fn open_demo(app: &AppHandle) -> Result<(), String> {
     let args = vec!["demo".to_string()];
     let (port, child) = start_server(app, &args, &std::env::temp_dir(), None)?;
     let url = Url::parse(&format!("http://127.0.0.1:{port}/")).map_err(|e| e.to_string())?;
-    present(app, None, child, None, url, "braid - demo").map(|_| ())
+    present(app, None, child, None, None, url, "braid - demo").map(|_| ())
 }
 
 /// Open `path` from whichever window asked. The launcher is replaced by a dashboard window; a dashboard window
 /// switches in place.
 fn open_from(app: &AppHandle, label: &str, path: &Path) -> Result<(), String> {
-    if label == LAUNCHER {
+    if !is_dashboard(label) {
         open_repo(app, None, path)?;
-        close_launcher(app);
+        close_launcher_if(app, label);
         Ok(())
     } else {
         open_repo(app, Some(label), path).map(|_| ())
@@ -243,14 +282,20 @@ fn show_window(app: &AppHandle) {
     }
 }
 
-/// The window an action should apply to: the focused one, else any.
+/// A window that shows a repository (not the launcher or the settings window).
+fn is_dashboard(label: &str) -> bool {
+    label != LAUNCHER && label != SETTINGS
+}
+
+/// The window an action should apply to: the focused dashboard, else any dashboard, else the launcher.
 fn target_label(app: &AppHandle) -> Option<String> {
     let windows = app.webview_windows();
-    windows
-        .iter()
+    let dashboards = || windows.iter().filter(|(label, _)| is_dashboard(label));
+    dashboards()
         .find(|(_, w)| w.is_focused().unwrap_or(false))
-        .or_else(|| windows.iter().next())
+        .or_else(|| dashboards().next())
         .map(|(label, _)| label.clone())
+        .or_else(|| windows.contains_key(LAUNCHER).then(|| LAUNCHER.to_string()))
 }
 
 /// The small start window: open a repository, pick a recent one, or watch a demo.
@@ -280,8 +325,11 @@ fn new_window(app: AppHandle) {
 
 /// Ask for a repository for the focused window.
 fn switch_focused(app: AppHandle) {
-    if let Some(label) = target_label(&app) {
-        thread::spawn(move || switch_repo(app, label));
+    match target_label(&app) {
+        Some(label) => {
+            thread::spawn(move || switch_repo(app, label));
+        }
+        None => new_window(app),
     }
 }
 
@@ -333,6 +381,105 @@ fn close_launcher_if(app: &AppHandle, label: &str) {
     if label == LAUNCHER {
         close_launcher(app);
     }
+}
+
+/// The Settings window: agents, models and API keys.
+fn show_settings(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(SETTINGS) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
+        .title("Braid Settings")
+        .inner_size(680.0, 780.0)
+        .min_inner_size(560.0, 480.0)
+        .center()
+        .build();
+    if let Err(e) = built {
+        report_error(app, "Could not open Settings", &e.to_string());
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SettingsView {
+    default_agent: Option<String>,
+    models: HashMap<String, String>,
+    /// Whether a key is stored per agent. The key itself never leaves the keychain except into a run's environment.
+    key_set: HashMap<String, bool>,
+}
+
+#[tauri::command]
+fn settings_get(app: AppHandle) -> SettingsView {
+    let s = settings::load(&app);
+    SettingsView { default_agent: s.default_agent, models: s.models, key_set: snapshot(&app).key_set }
+}
+
+/// Which agent CLIs are installed, by asking the bundled braid's `doctor`.
+#[tauri::command]
+async fn settings_agents(app: AppHandle) -> Result<serde_json::Value, String> {
+    let out = app
+        .shell()
+        .sidecar("braid")
+        .map_err(|e| e.to_string())?
+        .env("PATH", user_path())
+        .args(["doctor", "--json"])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("unreadable agent check: {e}"))
+}
+
+/// Default agent and per-agent models (not secrets). Applies to new runs everywhere, immediately.
+#[tauri::command]
+fn settings_save(app: AppHandle, default_agent: Option<String>, models: HashMap<String, String>) -> Result<(), String> {
+    let default_agent = default_agent.filter(|a| !a.is_empty());
+    if let Some(agent) = &default_agent {
+        settings::env_name(agent)?;
+    }
+    let mut clean = HashMap::new();
+    for (agent, model) in models {
+        settings::env_name(&agent)?;
+        let model = model.trim();
+        if !model.is_empty() {
+            if model.len() > 120 || model.chars().any(|c| c.is_control() || c.is_whitespace()) {
+                return Err(format!("\"{model}\" does not look like a model name"));
+            }
+            clean.insert(agent, model.to_string());
+        }
+    }
+    let next = settings::Settings { default_agent, models: clean };
+    settings::save(&app, &next)?;
+    // Only the non-secret part changed: reuse the cached key snapshot so no keychain prompt appears.
+    let mut snap = snapshot(&app);
+    snap.payload["defaults"] = serde_json::json!({ "driver": next.default_agent, "models": next.models });
+    *app.state::<SettingsCache>().0.lock().unwrap() = Some(snap.clone());
+    thread::spawn(move || push_to_sessions(&app, &snap.payload));
+    Ok(())
+}
+
+fn push_to_sessions(app: &AppHandle, payload: &serde_json::Value) {
+    let targets: Vec<(u16, String)> = app.state::<Sessions>().0.lock().unwrap().values().filter_map(|s| s.control.clone()).collect();
+    for (port, token) in targets {
+        if let Err(why) = settings::push(port, &token, payload) {
+            eprintln!("braid: could not push settings to port {port}: {why}");
+        }
+    }
+}
+
+#[tauri::command]
+fn settings_set_key(app: AppHandle, agent: String, value: String) -> Result<(), String> {
+    settings::key_set(&agent, &value)?;
+    thread::spawn(move || refresh_and_push(&app));
+    Ok(())
+}
+
+#[tauri::command]
+fn settings_clear_key(app: AppHandle, agent: String) -> Result<(), String> {
+    settings::key_clear(&agent)?;
+    thread::spawn(move || refresh_and_push(&app));
+    Ok(())
 }
 
 /// Polls the run files of every open window's repository. Updates the tray and raises notifications, except
@@ -401,15 +548,42 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(Sessions(Mutex::new(HashMap::new())))
         .manage(WindowCounter(AtomicUsize::new(0)))
-        .invoke_handler(tauri::generate_handler![recent_repos, launcher_choose, launcher_open, launcher_demo])
+        .manage(SettingsCache(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![
+            recent_repos,
+            launcher_choose,
+            launcher_open,
+            launcher_demo,
+            settings_get,
+            settings_agents,
+            settings_save,
+            settings_set_key,
+            settings_clear_key
+        ])
         .setup(|app| {
             // File > New Window / Open Repository, where Mac users look for them.
             let new = MenuItemBuilder::with_id("new-window", "New Window").accelerator("CmdOrCtrl+N").build(app)?;
             let open = MenuItemBuilder::with_id("open-repo", "Open Repository...").accelerator("CmdOrCtrl+O").build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings...").accelerator("CmdOrCtrl+,").build(app)?;
             let menu = Menu::default(app.handle())?;
             let mut placed = false;
+            let mut settings_placed = false;
             for item in menu.items()? {
                 if let MenuItemKind::Submenu(sub) = item {
+                    // macOS: the first submenu is the app menu (Braid > Settings...). Elsewhere: File.
+                    let is_app_menu = cfg!(target_os = "macos") && !settings_placed;
+                    if is_app_menu || (!cfg!(target_os = "macos") && sub.text()? == "File" && !settings_placed) {
+                        if is_app_menu {
+                            sub.insert(&PredefinedMenuItem::separator(app)?, 1)?;
+                            sub.insert(&settings_item, 2)?;
+                        } else {
+                            sub.append(&settings_item)?;
+                        }
+                        settings_placed = true;
+                        if is_app_menu {
+                            continue;
+                        }
+                    }
                     if sub.text()? == "File" {
                         sub.insert(&new, 0)?;
                         sub.insert(&open, 1)?;
@@ -428,10 +602,11 @@ fn main() {
             let show = MenuItem::with_id(app, "show", "Show Braid", true, None::<&str>)?;
             let tray_new = MenuItem::with_id(app, "tray-new-window", "New Window", true, None::<&str>)?;
             let pick = MenuItem::with_id(app, "tray-open-repo", "Open Repository...", true, None::<&str>)?;
+            let tray_settings = MenuItem::with_id(app, "tray-settings", "Settings...", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Braid", true, None::<&str>)?;
             let tray_menu = Menu::with_items(
                 app,
-                &[&status, &PredefinedMenuItem::separator(app)?, &show, &tray_new, &pick, &PredefinedMenuItem::separator(app)?, &quit],
+                &[&status, &PredefinedMenuItem::separator(app)?, &show, &tray_new, &pick, &tray_settings, &PredefinedMenuItem::separator(app)?, &quit],
             )?;
             let tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().expect("app icon").clone())
@@ -442,6 +617,7 @@ fn main() {
                     "show" => show_window(app),
                     "tray-new-window" => new_window(app.clone()),
                     "tray-open-repo" => switch_focused(app.clone()),
+                    "tray-settings" => show_settings(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -497,6 +673,7 @@ fn main() {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "new-window" => new_window(app.clone()),
             "open-repo" => switch_focused(app.clone()),
+            "settings" => show_settings(app),
             _ => {}
         })
         .build(tauri::generate_context!())

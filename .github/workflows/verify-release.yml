@@ -14,6 +14,8 @@ jobs:
       matrix:
         include:
           - { os: windows-latest, file: braid-windows-x64.exe }
+          # Windows on ARM (for example in Parallels on an Apple-silicon Mac) runs x64 programs through emulation.
+          - { os: windows-11-arm, file: braid-windows-x64.exe }
           - { os: ubuntu-latest, file: braid-linux-x64 }
           - { os: macos-14, file: braid-darwin-arm64 }
     runs-on: ${{ matrix.os }}

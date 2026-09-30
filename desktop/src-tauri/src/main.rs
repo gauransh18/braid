@@ -499,7 +499,8 @@ async fn refresh_models(app: &AppHandle, provider: &str) -> Result<serde_json::V
     let key = provider_key(app, provider)?;
     let mut fresh = sidecar_json(app, vec!["models".into(), provider.into(), "--json".into()], key).await?;
     fresh["at"] = serde_json::json!(now_secs());
-    if fresh["source"] == "live" {
+    // "live" is the provider's own API; "cli" is what the installed program knows. Both are worth keeping.
+    if fresh["source"] == "live" || fresh["source"] == "cli" {
         settings::store_models(app, provider, fresh.clone());
         return Ok(fresh);
     }
@@ -541,13 +542,12 @@ async fn settings_test(app: AppHandle, provider: String, model: Option<String>) 
     Ok(result)
 }
 
-/// Refresh every provider that has a key, once, in the background. Runs at launch.
+/// Refresh every provider once, in the background, at launch: from its API where a key is saved, else from the
+/// installed program.
 fn refresh_all_models(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         for (provider, _) in settings::AGENTS {
-            if matches!(provider_key(&app, provider), Ok(Some(_))) {
-                let _ = refresh_models(&app, provider).await;
-            }
+            let _ = refresh_models(&app, provider).await;
         }
     });
 }

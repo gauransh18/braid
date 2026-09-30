@@ -66,7 +66,7 @@
   <header><h1>Settings</h1><button class="btn" id="recheck">Recheck agents</button></header>
   <p class="lede">The coding agents braid can use, which one runs by default, and which model each uses. Switch off any you do not want braid to use. These apply to new runs in every window.</p>
   <div id="cards"></div>
-  <p class="foot">Runs already in progress keep the agent and model they started with. Type or pick a model; the suggestions are the provider's live list once a key is saved. Leave it empty for the CLI's own default. Other OpenAI-compatible providers and local models are planned.</p>
+  <p class="foot">Runs already in progress keep the agent and model they started with. Type or pick a model; suggestions come from your installed program, or the provider's live list once a key is saved. Leave it empty for the CLI's own default. Other OpenAI-compatible providers and local models are planned.</p>
   <div id="msg" role="status"></div>
 
 <script>
@@ -81,13 +81,13 @@
       defaultLabel: 'CLI default',
       // These names always point at the newest of their family, so they never go stale.
       aliases: [['opus', 'Opus (always the newest)'], ['sonnet', 'Sonnet (always the newest)'], ['haiku', 'Haiku (always the newest)']],
-      models: [['claude-fable-5-1', 'Fable 5.1'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-4-5-20251001', 'Haiku 4.5']] },
+      models: [['claude-opus-5-5', 'Opus 5.5'], ['claude-fable-5-1', 'Fable 5.1'], ['claude-sonnet-5', 'Sonnet 5'], ['claude-haiku-4-5', 'Haiku 4.5']] },
     { id: 'codex', name: 'Codex', provider: 'OpenAI', install: 'npm install -g @openai/codex',
       key: 'OpenAI API key',
       keyHint: 'Leave empty to use your ChatGPT sign-in (run codex login in a terminal). A key bills the OpenAI API instead of a ChatGPT plan.',
       defaultLabel: 'CLI default',
       aliases: [],
-      models: [['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex'], ['gpt-5-codex', 'GPT-5 Codex'], ['codex-mini', 'Codex mini']] },
+      models: [['gpt-5.6', 'GPT-5.6'], ['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex']] },
     { id: 'nim', name: 'NVIDIA NIM', provider: 'NVIDIA', api: true,
       key: 'NVIDIA API key (required)',
       keyHint: 'Create one at build.nvidia.com (it starts with nvapi-). braid runs the agent loop itself against NVIDIA\'s OpenAI-compatible API, so pick a model that supports tool calling. Tokens are always tracked; dollars only if you set prices in a BRAID_PRICES file.',
@@ -100,7 +100,7 @@
       keyHint: 'Leave empty to use the CLI\'s own Google sign-in. A key from Google AI Studio works when that sign-in is not available to you.',
       defaultLabel: 'CLI default',
       aliases: [],
-      models: [['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite']] },
+      models: [['gemini-3.5-flash', 'Gemini 3.5 Flash'], ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (preview)'], ['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash']] },
   ];
 
   // Hosted APIs after the CLIs.
@@ -119,8 +119,9 @@
     const keyed = !!state.key_set[a.id];
     if (l?.stale) return { text: `Could not refresh (${esc(l.error || 'unknown error')}). Showing the list from ${ago(l.at)}.`, warn: true };
     if (l?.source === 'live') return { text: `Live list from ${esc(a.provider)}: ${l.models.length} models, updated ${ago(l.at)}.`, warn: false };
+    if (l?.source === 'cli') return { text: `From your installed ${esc(a.name)}: ${l.models.length} model names, newest first, updated ${ago(l.at)}. It is what that version knows, so a retired name may still appear. Add an API key for ${esc(a.provider)}'s own live list.`, warn: false };
     if (l?.error && keyed) return { text: esc(l.error), warn: true };
-    return { text: keyed ? 'Loading the live model list...' : `Showing common names. Add an API key to load ${esc(a.provider)}'s live list, refreshed every time Braid starts.`, warn: false };
+    return { text: keyed ? 'Loading the live model list...' : a.api ? `Add an API key to load ${esc(a.provider)}'s live model list, refreshed every time Braid starts.` : `Showing common names. Click Refresh list to read them from your installed ${esc(a.name)}.`, warn: false };
   }
   function testHtml(id) {
     const t = tests[id];
@@ -191,7 +192,7 @@
         <div class="field"><label for="m-${a.id}">Model</label>
           <div class="row">
             <input type="text" id="m-${a.id}" list="dl-${a.id}" data-model="${a.id}" value="${esc(current)}" placeholder="${esc(a.defaultLabel)}" autocomplete="off" spellcheck="false">
-            <button class="btn" data-refresh="${a.id}" title="Fetch the current model list from ${esc(a.provider)}">Refresh list</button>
+            <button class="btn" data-refresh="${a.id}" title="${a.api ? 'Fetch the current model list from ' + esc(a.provider) : 'Read the current model names from your installed ' + esc(a.name) + ', or from ' + esc(a.provider) + ' if you saved a key'}">Refresh list</button>
           </div>
           <datalist id="dl-${a.id}">${modelOptions(a)}</datalist>
           <div class="srcline" data-src="${a.id}">${srcText(a).text}</div>
@@ -273,7 +274,7 @@
     recheck();
     // Cached lists show instantly; then every provider with a key is refreshed from its API.
     await Promise.all(AGENTS.map((a) => loadModels(a.id, false)));
-    for (const a of AGENTS) if (state.key_set[a.id]) loadModels(a.id, true);
+    for (const a of AGENTS) loadModels(a.id, true);
   })();
 </script>
 </body>

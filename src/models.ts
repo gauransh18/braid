@@ -78,11 +78,16 @@ const ENDPOINTS: Record<Provider, Endpoint> = {
 
 export interface ModelsResult {
   provider: Provider;
-  /** `live` came from the provider just now; `none` means nothing could be fetched (see `error`). */
-  source: 'live' | 'none';
+  /**
+   * `live`: the provider's own API, just now. `cli`: model names found inside the installed agent program (no key
+   * needed, refreshes when the program is updated). `none`: nothing could be fetched (see `error`).
+   */
+  source: 'live' | 'cli' | 'none';
   models: string[];
   error?: string;
   ms?: number;
+  /** For `cli`: the program that was read. */
+  from?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -104,7 +109,12 @@ function explain(p: Provider, status: number, detail: string): string {
 export async function fetchModels(provider: Provider, env: Env = process.env, fetchImpl: Fetch = fetch): Promise<ModelsResult> {
   const ep = ENDPOINTS[provider];
   const key = env[ep.keyEnv];
-  if (!key) return { provider, source: 'none', models: [], error: `No ${ep.label} API key set, so the live list is not available.` };
+  if (!key) {
+    // No key, so no API to ask. The installed CLI still knows which models it supports.
+    const scanned = await scanInstalledCli(provider, env);
+    if (scanned) return scanned;
+    return { provider, source: 'none', models: [], error: provider === 'nim' ? 'Add an NVIDIA API key to load the live model list.' : `No ${ep.label} API key set and the CLI was not found, so there is no list to load.` };
+  }
   const started = Date.now();
   try {
     const res = await fetchImpl(base(provider, env) + ep.path, { headers: ep.headers(key), signal: AbortSignal.timeout(15_000) });
@@ -146,7 +156,19 @@ export async function testProvider(provider: Provider, model: string | undefined
   const done = (): TestResult => ({ provider, ok: steps.every((s) => s.ok), steps });
   const key = env[ep.keyEnv];
   if (!key) {
-    steps.push({ name: 'API key', ok: false, detail: provider === 'nim' ? 'No NVIDIA API key is set. Save one first.' : `No API key set. That is fine if you use the ${provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Gemini'} CLI's own sign-in; there is nothing to test here.` });
+    if (provider === 'nim') {
+      steps.push({ name: 'API key', ok: false, detail: 'No NVIDIA API key is set. Save one first.' });
+      return done();
+    }
+    // A CLI provider without a key signs in through its own program; check that the program is there.
+    const found = await scanInstalledCli(provider, env);
+    const program = await findProgram(CLI_BIN[provider]!.name, env);
+    if (!program) {
+      steps.push({ name: 'Program found', ok: false, detail: `The ${CLI_BIN[provider]!.name} program was not found on this machine, and no API key is set. Install it or add a key.` });
+      return done();
+    }
+    steps.push({ name: 'Program found', ok: true, detail: `${program}${found ? ` (knows ${found.models.length} model names)` : ''}` });
+    steps.push({ name: 'Sign-in (not tested)', ok: true, detail: `No API key is set, so braid uses the program's own sign-in, which cannot be checked from here. If a run says you are not signed in, run ${CLI_BIN[provider]!.name} once in a terminal.` });
     return done();
   }
   steps.push({ name: 'API key', ok: true, detail: 'A key is saved.' });
@@ -190,4 +212,100 @@ export async function testProvider(provider: Provider, model: string | undefined
     }
   }
   return done();
+}
+
+
+// ------------------------------------------------ names inside an installed CLI
+
+const CLI_BIN: Partial<Record<Provider, { name: string; env: string }>> = {
+  claude: { name: 'claude', env: 'BRAID_CLAUDE_BIN' },
+  codex: { name: 'codex', env: 'BRAID_CODEX_BIN' },
+  gemini: { name: 'gemini', env: 'BRAID_GEMINI_BIN' },
+};
+
+/** What to look for in each CLI. A name is only taken when nothing model-name-like follows it, which drops dated and variant suffixes. */
+const SCAN: Partial<Record<Provider, RegExp>> = {
+  claude: /claude-(?:opus|sonnet|haiku|fable)-\d+(?:-\d{1,2})?(?![\d-])/g,
+  codex: /gpt-\d+(?:\.\d+)?(?:-[a-z]+)*(?![a-z0-9.-])/g,
+  gemini: /gemini-\d+(?:\.\d+)?-(?:pro|flash-lite|flash)(?:-preview)?(?![a-z0-9.-])/g,
+};
+
+async function findProgram(name: string, env: Env): Promise<string | null> {
+  const { access, realpath } = await import('node:fs/promises');
+  const { constants } = await import('node:fs');
+  const { delimiter, isAbsolute, join } = await import('node:path');
+  const override = env[CLI_BIN[Object.keys(CLI_BIN).find((k) => CLI_BIN[k as Provider]!.name === name) as Provider]!.env];
+  const candidates = override && isAbsolute(override) ? [override] : (env.PATH ?? '').split(delimiter).filter(Boolean).map((d) => join(d, name));
+  for (const c of candidates) {
+    try {
+      await access(c, constants.X_OK);
+      return await realpath(c);
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
+/** Read a file in pieces and collect regex matches, without holding a 200 MB program in memory. */
+async function scanFile(file: string, re: RegExp, into: Set<string>): Promise<void> {
+  const { open } = await import('node:fs/promises');
+  const handle = await open(file, 'r');
+  try {
+    const size = (await handle.stat()).size;
+    const chunk = 8 * 1024 * 1024;
+    const overlap = 128; // a name cut by a chunk boundary is still seen whole in the next read
+    const buf = Buffer.alloc(chunk + overlap);
+    for (let pos = 0; pos < size; pos += chunk) {
+      const { bytesRead } = await handle.read(buf, 0, chunk + overlap, pos);
+      for (const m of buf.toString('latin1', 0, bytesRead).matchAll(re)) into.add(m[0]);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Newest first: higher version numbers win, then the larger family (pro before flash, opus before sonnet). */
+function newestFirst(a: string, b: string): number {
+  const nums = (s: string) => (s.replace(/^[a-z]+-/, '').match(/\d+/g) ?? []).map(Number);
+  const [x, y] = [nums(a), nums(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (y[i] ?? -1) - (x[i] ?? -1);
+    if (d) return d;
+  }
+  const rank = (s: string) => ['fable', 'opus', 'sonnet', 'haiku', 'pro', 'flash-lite', 'flash', 'codex', 'max'].findIndex((f) => s.includes(f));
+  return rank(a) - rank(b) || a.localeCompare(b);
+}
+
+/**
+ * Model names embedded in the installed agent program. This is what that version of the CLI knows about, so it
+ * follows the CLI when it updates. It is a best guess: names can be retired on the provider's side.
+ */
+export async function scanInstalledCli(provider: Provider, env: Env = process.env): Promise<ModelsResult | null> {
+  const cli = CLI_BIN[provider];
+  const re = SCAN[provider];
+  if (!cli || !re) return null;
+  const started = Date.now();
+  const program = await findProgram(cli.name, env);
+  if (!program) return null;
+  const { dirname, join } = await import('node:path');
+  const { readdir } = await import('node:fs/promises');
+  const files = [program];
+  // The Gemini CLI is a JavaScript bundle: its names live in the sibling chunk files.
+  if (provider === 'gemini') {
+    const dir = dirname(program);
+    const chunks = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith('.js')).map((f) => join(dir, f));
+    if (chunks.length) files.splice(0, files.length, ...chunks);
+  }
+  const found = new Set<string>();
+  try {
+    for (const f of files) await scanFile(f, new RegExp(re.source, 'g'), found);
+  } catch {
+    return null;
+  }
+  let models = [...found];
+  if (provider === 'codex') models = models.filter((m) => Number(/gpt-(\d+)/.exec(m)?.[1]) >= 5);
+  models.sort(newestFirst);
+  if (!models.length) return null;
+  return { provider, source: 'cli', models: models.slice(0, 16), from: program, ms: Date.now() - started };
 }

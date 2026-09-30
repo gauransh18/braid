@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { fetchModels, testProvider, type Provider } from '../src/models.js';
 
@@ -12,7 +15,11 @@ interface Seen {
 type Handler = (req: Seen) => { status?: number; body: unknown };
 
 const servers: { close: () => void }[] = [];
-after(() => servers.forEach((s) => s.close()));
+const temps: string[] = [];
+after(() => {
+  servers.forEach((s) => s.close());
+  for (const d of temps) rmSync(d, { recursive: true, force: true });
+});
 
 async function api(handler: Handler): Promise<{ url: string; seen: Seen[] }> {
   const seen: Seen[] = [];
@@ -39,6 +46,17 @@ const envFor = (provider: Provider, url: string, key = 'key-not-real') =>
     gemini: { GEMINI_API_KEY: key, BRAID_GEMINI_BASE_URL: url },
     nim: { NVIDIA_API_KEY: key, BRAID_NIM_BASE_URL: url },
   })[provider];
+
+/** A directory on PATH holding fake agent programs whose bytes embed the given text. */
+function programs(files: Record<string, string | Buffer>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'braid-cli-'));
+  temps.push(dir);
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(dir, name), content);
+    chmodSync(join(dir, name), 0o755);
+  }
+  return dir;
+}
 
 describe('live model lists', () => {
   it('reads each provider in its own format and authenticates the way that provider expects', async () => {
@@ -76,7 +94,7 @@ describe('live model lists', () => {
   it('says why nothing came back: no key, a rejected key, a broken reply, an unreachable server', async () => {
     const none = await fetchModels('nim', {});
     assert.equal(none.source, 'none');
-    assert.match(none.error!, /No NVIDIA NIM API key set/);
+    assert.match(none.error!, /Add an NVIDIA API key/);
 
     const denied = await api(() => ({ status: 401, body: { error: 'nope' } }));
     assert.match((await fetchModels('nim', envFor('nim', denied.url))).error!, /rejected the API key \(HTTP 401\)/);
@@ -134,8 +152,75 @@ describe('provider test', () => {
     assert.equal(ok.ok, true);
     assert.equal(server.seen.length, 1, 'only the free model list was requested');
 
-    const none = await testProvider('claude', undefined, {});
-    assert.equal(none.ok, false);
-    assert.match(none.steps[0]!.detail, /own sign-in/);
+    // No key: check the installed program instead, and be honest that sign-in cannot be tested.
+    const installed = await testProvider('claude', undefined, { PATH: programs({ claude: Buffer.from('claude-opus-5-5 claude-sonnet-5') }) });
+    assert.equal(installed.ok, true);
+    assert.deepEqual(installed.steps.map((s) => s.name), ['Program found', 'Sign-in (not tested)']);
+    assert.match(installed.steps[0]!.detail, /knows 2 model names/);
+    assert.match(installed.steps[1]!.detail, /cannot be checked from here/);
+
+    const absent = await testProvider('claude', undefined, { PATH: programs({}) });
+    assert.equal(absent.ok, false);
+    assert.match(absent.steps[0]!.detail, /not found on this machine/);
+  });
+});
+
+describe('model names from an installed CLI (no key needed)', () => {
+  const junk = (n: number) => Buffer.alloc(n, 0x7f);
+
+  it('reads Claude Code names, newest first, ignoring dated and variant look-alikes', async () => {
+    const bin = Buffer.concat([
+      junk(10),
+      Buffer.from('claude-opus-4-20250514 claude-opus-4-1-20250805-v1 claude-sonnet-4-5-20250929 '),
+      junk(5),
+      Buffer.from('\0claude-opus-5-5\0claude-sonnet-5\0claude-haiku-4-5\0claude-fable-5-1\0claude-opus-4-1\0claude-code-version'),
+    ]);
+    const res = await fetchModels('claude', { PATH: programs({ claude: bin }) });
+    assert.equal(res.source, 'cli');
+    assert.deepEqual(res.models, ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-4-1']);
+    assert.match(res.from!, /claude$/);
+  });
+
+  it('reads Codex gpt-5+ names and drops older models and file names', async () => {
+    const bin = Buffer.concat([junk(8), Buffer.from('gpt-5.6\0gpt-5.6-sol\0gpt-5.3-codex\0gpt-4o\0gpt-4.1-mini\0gpt-5p6-sol.md\0codex-api\0gpt-5.1-codex-max\0gpt-5.2.md')]);
+    const res = await fetchModels('codex', { PATH: programs({ codex: bin }) });
+    assert.deepEqual(res.models, ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.3-codex', 'gpt-5.1-codex-max']);
+  });
+
+  it('reads the Gemini CLI from its bundle files and skips image, live and base variants', async () => {
+    const dir = programs({});
+    const bundle = join(dir, 'bundle');
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, 'gemini.js'), '// entry\nconst a = "gemini-3.5-flash"; const b = "gemini-2.5-flash-image";');
+    writeFileSync(join(bundle, 'chunk-1.js'), 'x = ["gemini-3.1-pro-preview","gemini-3-flash-base","gemini-2.5-pro","gemini-3.1-flash-live-preview","gemini-2.5-flash-lite"]');
+    // The program on PATH is a link to the bundle entry, like an npm-installed CLI.
+    const { symlinkSync } = await import('node:fs');
+    mkdirSync(join(dir, 'bin'));
+    symlinkSync(join(bundle, 'gemini.js'), join(dir, 'bin', 'gemini'));
+    chmodSync(join(bundle, 'gemini.js'), 0o755);
+    const res = await fetchModels('gemini', { PATH: join(dir, 'bin') });
+    assert.equal(res.source, 'cli');
+    assert.deepEqual(res.models, ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash-lite']);
+  });
+
+  it('finds a name that straddles the read boundary', async () => {
+    const chunk = 8 * 1024 * 1024;
+    const name = Buffer.from('claude-opus-5-5');
+    const big = Buffer.concat([junk(chunk - 6), name, junk(1000)]); // the name starts 6 bytes before the boundary
+    const res = await fetchModels('claude', { PATH: programs({ claude: big }) });
+    assert.deepEqual(res.models, ['claude-opus-5-5']);
+  });
+
+  it('prefers the live API when a key is set, and says nothing was found when the CLI is absent', async () => {
+    const server = await api(() => ({ body: { data: [{ id: 'claude-opus-9-9' }] } }));
+    const withKey = await fetchModels('claude', { ...envFor('claude', server.url), PATH: programs({ claude: Buffer.from('claude-opus-5-5') }) });
+    assert.equal(withKey.source, 'live');
+    assert.deepEqual(withKey.models, ['claude-opus-9-9']);
+
+    const missing = await fetchModels('codex', { PATH: programs({}) });
+    assert.equal(missing.source, 'none');
+    assert.match(missing.error!, /CLI was not found/);
+    const nim = await fetchModels('nim', { PATH: programs({}) });
+    assert.match(nim.error!, /Add an NVIDIA API key/);
   });
 });

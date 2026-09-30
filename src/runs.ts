@@ -20,13 +20,15 @@ export class HttpError extends Error {
 const START_TIMEOUT_MS = 30_000;
 
 /** Provider keys the desktop app's Settings may hand to this process. Anything else is refused. */
-export const KEY_ENV_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'] as const;
+export const KEY_ENV_NAMES = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY'] as const;
 
 /** What a plan uses when it does not choose for itself. */
 export interface AgentDefaults {
   driver?: string;
   /** Model per driver; a missing or empty entry means the CLI's own default. */
   models?: Record<string, string>;
+  /** Agents the person switched off in Settings. Plans that need one are refused; defaults skip them. */
+  disabled?: string[];
 }
 
 export interface SettingsInput {
@@ -87,14 +89,40 @@ export class RunManager {
         this.originalEnv.delete(name);
       }
     }
-    if (d) this.defaults = { driver: d.driver || undefined, models: Object.fromEntries(Object.entries(d.models ?? {}).filter(([, m]) => m)) };
+    if (d) {
+      this.defaults = {
+        driver: d.driver || undefined,
+        models: Object.fromEntries(Object.entries(d.models ?? {}).filter(([, m]) => m)),
+        disabled: (d.disabled ?? []).filter((n) => typeof n === 'string'),
+      };
+    }
+  }
+
+  isDisabled(agent: string): boolean {
+    return !!this.defaults.disabled?.includes(agent);
+  }
+
+  /** The agent a plan that names none will use: the chosen default unless it is switched off, else the first one that is on. */
+  effectiveDriver(): string {
+    const d = this.defaults.driver;
+    if (d && !this.isDisabled(d)) return d;
+    return this.drivers().names().find((n) => !this.isDisabled(n)) ?? d ?? 'claude';
+  }
+
+  /** Refuse a plan that needs an agent the person turned off. */
+  private checkEnabled(plan: PlanSpec): void {
+    const main = plan.driver ?? this.effectiveDriver();
+    const used = new Set([main, ...(plan.tasks ?? []).map((t) => t.driver ?? main)]);
+    for (const agent of used) {
+      if (this.isDisabled(agent)) throw new HttpError(400, `The ${agent} agent is switched off in Settings. Switch it on there, or choose another agent in the plan.`);
+    }
   }
 
   /** A copy of `plan` with the default agent and model filled in wherever it left them open. */
   private withDefaults(plan: PlanSpec): PlanSpec {
     const d = this.defaults;
     const out = structuredClone(plan);
-    if (!out.driver && d.driver) out.driver = d.driver;
+    if (!out.driver && (d.driver || d.disabled?.length)) out.driver = this.effectiveDriver();
     const main = out.driver ?? 'claude';
     if (!out.model && d.models?.[main]) out.model = d.models[main];
     for (const t of out.tasks ?? []) {
@@ -120,6 +148,7 @@ export class RunManager {
     // A resumed run keeps the agent and model it started with; the stored plan already has them.
     const plan = resumeId ? given : this.withDefaults(given);
     this.checkPlan(plan);
+    this.checkEnabled(plan);
     if (this.active) throw new HttpError(409, `run ${this.active.runId} is still active`);
 
     const ac = new AbortController();
@@ -183,7 +212,8 @@ export class RunManager {
 
   async draft(goal: string, verify: string[], requested?: string): Promise<{ plan: PlanSpec; costUsd: number }> {
     if (!goal.trim()) throw new HttpError(400, 'goal is required');
-    const driver = requested ?? this.defaults.driver ?? 'claude';
+    const driver = requested ?? this.effectiveDriver();
+    if (this.isDisabled(driver)) throw new HttpError(400, `The ${driver} agent is switched off in Settings.`);
     try {
       return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model: this.defaults.models?.[driver] });
     } catch (err) {

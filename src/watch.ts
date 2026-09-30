@@ -123,7 +123,14 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
   if (parts[1] === 'status' && req.method === 'GET') {
     return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo), defaults: runs.agentDefaults });
   }
-  if (parts[1] === 'doctor' && req.method === 'GET') return send(res, 200, await checkTools());
+  if (parts[1] === 'doctor' && req.method === 'GET') {
+    // The CLIs braid can find, plus NVIDIA NIM, which is a hosted API: "installed" there means a key is set.
+    const rows = [
+      ...(await checkTools()),
+      { name: 'nim', ok: !!process.env.NVIDIA_API_KEY, version: 'API key set', required: false, why: 'NVIDIA NIM hosted models', install: 'Add an NVIDIA API key in Braid > Settings' },
+    ];
+    return send(res, 200, rows.map((r) => ({ ...r, disabled: runs.isDisabled(r.name) })));
+  }
 
   if (parts[1] === 'plans' && req.method === 'GET') {
     const dir = join(repo, 'plans');

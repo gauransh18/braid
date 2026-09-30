@@ -249,10 +249,57 @@ describe('control endpoints', () => {
       assert.equal((await call(server, 'GET', '/api/runs')).json.length, before, 'no empty run folder is left behind');
     });
 
+    it('refuses plans that need a switched-off agent, and skips it when choosing a default', async () => {
+      script = () => ({ files: { 'a.txt': 'a\n' } });
+      const plain: PlanSpec = { goal: 'g', budgetUsd: 1, tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
+      try {
+        // Claude is the default and is switched off: a plan that names nothing falls back to the next agent that is on.
+        assert.equal((await settings({ defaults: { driver: 'claude', disabled: ['claude'] } })).status, 200);
+        assert.deepEqual((await authed(server, 'GET', '/api/status')).json.defaults.disabled, ['claude']);
+        const fallback = await authed(server, 'POST', '/api/runs', { plan: plain });
+        assert.equal(fallback.status, 202);
+        assert.equal(storedPlan(fallback.json.runId).driver, 'mock', 'skipped the disabled default');
+        await finished(fallback.json.runId);
+
+        // Naming a disabled agent, on the plan or on one task, is refused with a fix.
+        const asked = await authed(server, 'POST', '/api/runs', { plan: { ...plain, driver: 'claude' } });
+        assert.equal(asked.status, 400);
+        assert.match(asked.json.error, /claude agent is switched off in Settings/);
+        const task = await authed(server, 'POST', '/api/runs', { plan: { ...plain, driver: 'mock', tasks: [{ id: 'a', title: 'A', prompt: 'p', driver: 'claude' }] } });
+        assert.equal(task.status, 400);
+
+        // Drafting with a disabled agent is refused too, and the doctor list says which are off.
+        assert.equal((await authed(server, 'POST', '/api/plan-draft', { goal: 'x', driver: 'claude' })).status, 400);
+        const rows = (await authed(server, 'GET', '/api/doctor')).json as { name: string; disabled: boolean }[];
+        assert.equal(rows.find((r) => r.name === 'claude')?.disabled, true);
+        assert.equal(rows.find((r) => r.name === 'git')?.disabled, false);
+        assert.ok(rows.some((r) => r.name === 'nim'), 'NIM is listed alongside the CLIs');
+      } finally {
+        await settings({ defaults: {} });
+      }
+      assert.equal((await authed(server, 'POST', '/api/runs', { plan: { ...plain, driver: 'claude' } })).status, 202, 'switching it back on allows it again');
+      await until(async () => (await authed(server, 'GET', '/api/status')).json.active === null);
+    });
+
+    it('accepts the NVIDIA key like the other provider keys', async () => {
+      const before = process.env.NVIDIA_API_KEY;
+      try {
+        assert.equal((await settings({ env: { NVIDIA_API_KEY: 'nvapi-dummy-for-test' } })).status, 200);
+        assert.equal(process.env.NVIDIA_API_KEY, 'nvapi-dummy-for-test');
+        const rows = (await authed(server, 'GET', '/api/doctor')).json as { name: string; ok: boolean }[];
+        assert.equal(rows.find((r) => r.name === 'nim')?.ok, true);
+        await settings({ env: { NVIDIA_API_KEY: null } });
+        assert.equal(process.env.NVIDIA_API_KEY, before);
+      } finally {
+        if (before === undefined) delete process.env.NVIDIA_API_KEY;
+        else process.env.NVIDIA_API_KEY = before;
+      }
+    });
+
     it('applies the default agent and model to plans that do not choose, and reports them', async () => {
       script = () => ({ files: { 'a.txt': 'a\n' } });
       assert.equal((await settings({ defaults: { driver: 'mock', models: { mock: 'mock-model-1', claude: 'sonnet', codex: '' } } })).status, 200);
-      assert.deepEqual((await authed(server, 'GET', '/api/status')).json.defaults, { driver: 'mock', models: { mock: 'mock-model-1', claude: 'sonnet' } });
+      assert.deepEqual((await authed(server, 'GET', '/api/status')).json.defaults, { driver: 'mock', models: { mock: 'mock-model-1', claude: 'sonnet' }, disabled: [] });
 
       const open: PlanSpec = { goal: 'g', budgetUsd: 2, tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p', driver: 'claude' }] };
       const res = await authed(server, 'POST', '/api/runs', { plan: open });

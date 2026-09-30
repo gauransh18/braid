@@ -406,6 +406,7 @@ fn show_settings(app: &AppHandle) {
 struct SettingsView {
     default_agent: Option<String>,
     models: HashMap<String, String>,
+    disabled: Vec<String>,
     /// Whether a key is stored per agent. The key itself never leaves the keychain except into a run's environment.
     key_set: HashMap<String, bool>,
 }
@@ -413,7 +414,7 @@ struct SettingsView {
 #[tauri::command]
 fn settings_get(app: AppHandle) -> SettingsView {
     let s = settings::load(&app);
-    SettingsView { default_agent: s.default_agent, models: s.models, key_set: snapshot(&app).key_set }
+    SettingsView { default_agent: s.default_agent, models: s.models, disabled: s.disabled, key_set: snapshot(&app).key_set }
 }
 
 /// Which agent CLIs are installed, by asking the bundled braid's `doctor`.
@@ -433,8 +434,12 @@ async fn settings_agents(app: AppHandle) -> Result<serde_json::Value, String> {
 
 /// Default agent and per-agent models (not secrets). Applies to new runs everywhere, immediately.
 #[tauri::command]
-fn settings_save(app: AppHandle, default_agent: Option<String>, models: HashMap<String, String>) -> Result<(), String> {
-    let default_agent = default_agent.filter(|a| !a.is_empty());
+fn settings_save(app: AppHandle, default_agent: Option<String>, models: HashMap<String, String>, disabled: Vec<String>) -> Result<(), String> {
+    for agent in &disabled {
+        settings::env_name(agent)?;
+    }
+    // A switched-off agent cannot also be the default.
+    let default_agent = default_agent.filter(|a| !a.is_empty() && !disabled.contains(a));
     if let Some(agent) = &default_agent {
         settings::env_name(agent)?;
     }
@@ -449,11 +454,11 @@ fn settings_save(app: AppHandle, default_agent: Option<String>, models: HashMap<
             clean.insert(agent, model.to_string());
         }
     }
-    let next = settings::Settings { default_agent, models: clean };
+    let next = settings::Settings { default_agent, models: clean, disabled };
     settings::save(&app, &next)?;
     // Only the non-secret part changed: reuse the cached key snapshot so no keychain prompt appears.
     let mut snap = snapshot(&app);
-    snap.payload["defaults"] = serde_json::json!({ "driver": next.default_agent, "models": next.models });
+    snap.payload["defaults"] = serde_json::json!({ "driver": next.default_agent, "models": next.models, "disabled": next.disabled });
     *app.state::<SettingsCache>().0.lock().unwrap() = Some(snap.clone());
     thread::spawn(move || push_to_sessions(&app, &snap.payload));
     Ok(())

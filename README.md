@@ -56,7 +56,7 @@ a list of recent repositories. Picking one opens a dashboard window for it, with
 running in the background as that repository's server. **File > Open Repository...** (Cmd+O) switches the current window
 to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories
 at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu.
-**Braid > Settings...** (Cmd+,) manages the agents: which of Claude Code, Codex and Gemini CLI are installed (with install commands for the ones that are not), which is the default, which model each uses (a preset list or any name you type), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
+**Braid > Settings...** (Cmd+,) manages the agents: which of Claude Code, Codex and Gemini CLI are installed, plus **NVIDIA NIM** (a hosted API: add an `nvapi-` key and pick a model; braid runs the agent loop itself) (with install commands for the ones that are not), which is the default, which model each uses (a preset list or any name you type), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Each agent has an **Enabled** switch: a switched-off agent is never used as the default, and a plan that asks for it is refused with a clear message. Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
 the last window hides to the menu bar, whose icon shows how many runs are active (**Quit Braid** really quits). macOS
 notifications announce a finished, failed or stopped run and each task that fails, but only while no window is focused (the
 first launch asks for notification permission). Needs Rust, Bun and the Tauri CLI
@@ -104,7 +104,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `maxReplans` | plan | Times the planner may split or rewrite a task that failed for good (default 0, off) |
 | `sandbox` | plan | Run setup, verify and optionally the agent in a Docker/Podman container. See [Sandbox](#sandbox) |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |
-| `driver`, `model` | both | `claude` (default), `codex`, `gemini`, `mock` |
+| `driver`, `model` | both | `claude` (default), `codex`, `gemini`, `nim` (NVIDIA NIM, needs `NVIDIA_API_KEY`), `mock` |
 | `verify` | both | Commands that must exit 0 |
 | `review` | both | Run a read-only reviewer on the diff |
 | `maxAttempts` | both | Tries, including retries with feedback (default 2) |

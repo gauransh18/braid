@@ -1055,10 +1055,12 @@ function mountComposer(host, onStarted) {
   api('GET', '/api/status').then((st) => { defaults = st.defaults || {}; if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
   api('GET', '/api/plans').then((names) => { f('saved').innerHTML = '<option value="">Load a saved plan...</option>' + names.map((n) => `<option>${esc2(n)}</option>`).join(''); if (!names.length) { f('saved').hidden = true; f('saved').nextElementSibling.hidden = true; } }).catch(() => {});
   api('GET', '/api/doctor').then((tools) => {
-    const agents = tools.filter((t) => ['claude', 'codex', 'gemini'].includes(t.name));
-    const any = agents.some((t) => t.ok);
-    f('agents').innerHTML = '<span>Agents on this machine:</span>' + agents.map((t) => `<span class="chip-a ${t.ok ? 'ok' : ''}" title="${esc2(t.ok ? t.version : 'not found. ' + t.install)}">${t.ok ? '&#10003;' : '&#10007;'} ${esc2(t.name)}</span>`).join('') +
-      (any ? '' : `<span class="warn">No agent CLI found. Install one (for example: ${esc2(agents.find((t) => t.name === 'claude')?.install || 'Claude Code')}), sign in once in a terminal, then reopen this window.</span>`);
+    const agents = tools.filter((t) => ['claude', 'codex', 'gemini', 'nim'].includes(t.name));
+    const usable = agents.some((t) => t.ok && !t.disabled);
+    const mark = (t) => (t.disabled ? '&#8856;' : t.ok ? '&#10003;' : '&#10007;');
+    const why = (t) => (t.disabled ? 'switched off in Settings' : t.ok ? t.version : 'not available. ' + t.install);
+    f('agents').innerHTML = '<span>Agents:</span>' + agents.map((t) => `<span class="chip-a ${t.ok && !t.disabled ? 'ok' : ''}" title="${esc2(why(t))}">${mark(t)} ${esc2(t.name === 'nim' ? 'NVIDIA NIM' : t.name)}${t.disabled ? ' (off)' : ''}</span>`).join('') +
+      (usable ? '' : `<span class="warn">No agent is ready. Install one (for example: ${esc2(agents.find((t) => t.name === 'claude')?.install || 'Claude Code')}) and sign in once in a terminal, or add an NVIDIA API key, in Braid > Settings (Cmd+,).</span>`);
   }).catch(() => {});
 
   act('draft').addEventListener('click', async () => {

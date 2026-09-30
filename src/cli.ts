@@ -7,6 +7,7 @@ import { CodexDriver } from './drivers/codex.js';
 import { DriverRegistry } from './drivers/driver.js';
 import { GeminiDriver } from './drivers/gemini.js';
 import { MockDriver } from './drivers/mock.js';
+import { NIM_DEFAULT_MODEL, OpenAICompatDriver } from './drivers/openai-compat.js';
 import { createDemoRun } from './demo.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
@@ -38,7 +39,21 @@ Runs never touch your branches. Work lands on braid/<runId>/integration;
 review it and merge it yourself.`;
 
 function registry(): DriverRegistry {
-  return new DriverRegistry().register(new ClaudeDriver()).register(new CodexDriver()).register(new GeminiDriver()).register(new MockDriver());
+  return new DriverRegistry()
+    .register(new ClaudeDriver())
+    .register(new CodexDriver())
+    .register(new GeminiDriver())
+    // NVIDIA NIM's hosted, OpenAI-compatible API. The key comes from Settings (or the shell) at run time.
+    .register(
+      new OpenAICompatDriver({
+        name: 'nim',
+        label: 'NVIDIA NIM',
+        baseUrl: process.env.BRAID_NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
+        keyEnv: 'NVIDIA_API_KEY',
+        defaultModel: NIM_DEFAULT_MODEL,
+      }),
+    )
+    .register(new MockDriver());
 }
 
 function printEvent(e: HarnessEvent): void {

@@ -27,7 +27,10 @@
   .btn[disabled] { opacity: .5; cursor: default; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
   .card.default { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .card.off > :not(.top) { opacity: .45; }
+  .card.off .top h2, .card.off .prov { opacity: .6; }
+  .top { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
+  .toggles { display: flex; gap: 16px; white-space: nowrap; margin-left: auto; }
   .top h2 { margin: 0; font-size: 16px; }
   .prov { color: var(--muted); font-size: 12px; }
   .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); }
@@ -53,9 +56,9 @@
 </head>
 <body>
   <header><h1>Settings</h1><button class="btn" id="recheck">Recheck agents</button></header>
-  <p class="lede">The coding agents braid can use on this machine, which one runs by default, and which model each uses. These apply to new runs in every window.</p>
+  <p class="lede">The coding agents braid can use, which one runs by default, and which model each uses. Switch off any you do not want braid to use. These apply to new runs in every window.</p>
   <div id="cards"></div>
-  <p class="foot">Runs already in progress keep the agent and model they started with. Not seeing a model? Choose <b>Custom...</b> and type its name exactly as the provider spells it. More providers (OpenCode, local models) are planned.</p>
+  <p class="foot">Runs already in progress keep the agent and model they started with. Not seeing a model? Choose <b>Custom...</b> and type its name exactly as the provider spells it. Other OpenAI-compatible providers and local models are planned.</p>
   <div id="msg" role="status"></div>
 
 <script>
@@ -72,13 +75,20 @@
       key: 'OpenAI API key',
       keyHint: 'Leave empty to use your ChatGPT sign-in (run codex login in a terminal). A key bills the OpenAI API instead of a ChatGPT plan.',
       models: [['', 'CLI default'], ['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex'], ['gpt-5-codex', 'GPT-5 Codex'], ['codex-mini', 'Codex mini']] },
+    { id: 'nim', name: 'NVIDIA NIM', provider: 'NVIDIA', api: true,
+      key: 'NVIDIA API key (required)',
+      keyHint: 'Create one at build.nvidia.com (it starts with nvapi-). braid runs the agent loop itself against NVIDIA\'s OpenAI-compatible API, so pick a model that supports tool calling. Tokens are always tracked; dollars only if you set prices in a BRAID_PRICES file.',
+      models: [['', 'meta/llama-3.3-70b-instruct (default)'], ['meta/llama-3.1-405b-instruct', 'Llama 3.1 405B Instruct'], ['qwen/qwen3-coder-480b-a35b-instruct', 'Qwen3 Coder 480B'], ['moonshotai/kimi-k2-instruct', 'Kimi K2 Instruct'], ['openai/gpt-oss-120b', 'gpt-oss 120B'], ['nvidia/llama-3.3-nemotron-super-49b-v1', 'Nemotron Super 49B']] },
     { id: 'gemini', name: 'Gemini CLI', provider: 'Google', install: 'npm install -g @google/gemini-cli',
       key: 'Gemini API key',
       keyHint: 'Leave empty to use the CLI\'s own Google sign-in. A key from Google AI Studio works when that sign-in is not available to you.',
       models: [['', 'CLI default'], ['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite']] },
   ];
 
-  let state = { default_agent: null, models: {}, key_set: {} };
+  // Hosted APIs after the CLIs.
+  AGENTS.push(AGENTS.splice(AGENTS.findIndex((a) => a.id === 'nim'), 1)[0]);
+
+  let state = { default_agent: null, models: {}, key_set: {}, disabled: [] };
   let status = {}; // agent id -> { ok, version, install }
 
   let toastTimer;
@@ -101,7 +111,7 @@
   async function saveChoices() {
     try {
       const models = collectModels();
-      await call('settings_save', { defaultAgent: state.default_agent, models });
+      await call('settings_save', { defaultAgent: state.default_agent, models, disabled: state.disabled });
       state.models = models;
       toast('Saved');
     } catch (e) { toast(String(e), true); }
@@ -110,19 +120,24 @@
   function render() {
     $('cards').innerHTML = AGENTS.map((a) => {
       const s = status[a.id];
-      const installed = s?.ok;
+      const on = !state.disabled.includes(a.id);
+      const keyOn0 = !!state.key_set[a.id];
+      // A CLI counts as installed when found; a hosted API (NIM) is ready once its key is set.
+      const installed = a.api ? keyOn0 : s?.ok;
       const current = state.models[a.id] || '';
       const known = a.models.some(([v]) => v === current);
       const isDefault = state.default_agent === a.id;
       const keyOn = !!state.key_set[a.id];
-      return `<section class="card ${isDefault ? 'default' : ''}" data-agent="${a.id}">
+      return `<section class="card ${isDefault && on ? 'default' : ''} ${on ? '' : 'off'}" data-agent="${a.id}">
         <div class="top">
           <h2>${esc(a.name)}</h2><span class="prov">${esc(a.provider)}</span>
-          <span class="pill ${installed ? 'ok' : ''}">${s === undefined ? 'checking...' : installed ? `&#10003; installed${s.version ? ' · ' + esc(s.version) : ''}` : '&#10007; not found'}</span>
-          <span class="spacer"></span>
-          <label class="radio"><input type="radio" name="def" value="${a.id}" ${isDefault ? 'checked' : ''}> Default agent</label>
+          <span class="pill ${installed ? 'ok' : ''}">${a.api ? (keyOn0 ? '&#10003; API key set' : 'needs an API key') : s === undefined ? 'checking...' : installed ? `&#10003; installed${s.version ? ' · ' + esc(s.version) : ''}` : '&#10007; not found'}</span>
+          <span class="toggles">
+          <label class="radio" title="Switched-off agents are never used, and plans that ask for one are refused"><input type="checkbox" data-enabled="${a.id}" ${on ? 'checked' : ''}> Enabled</label>
+          <label class="radio"><input type="radio" name="def" value="${a.id}" ${isDefault ? 'checked' : ''} ${on ? '' : 'disabled'}> Default agent</label>
+          </span>
         </div>
-        ${s !== undefined && !installed ? `<div class="install">Not installed on this machine. Install it with <code>${esc(a.install)}</code>, sign in once in a terminal, then click <b>Recheck agents</b>.
+        ${!a.api && s !== undefined && !installed ? `<div class="install">Not installed on this machine. Install it with <code>${esc(a.install)}</code>, sign in once in a terminal, then click <b>Recheck agents</b>.
           <button class="btn" data-copy="${esc(a.install)}">Copy command</button></div>` : ''}
         <div class="field"><label for="m-${a.id}">Model</label>
           <div class="row">
@@ -135,7 +150,7 @@
         </div>
         <div class="field"><span class="lab">${esc(a.key)}</span>
           ${keyOn ? `<div class="row"><span class="saved">&#10003; Saved in your keychain</span><button class="btn danger" data-clear="${a.id}">Remove</button></div>` :
-            `<div class="row"><input type="password" data-key="${a.id}" placeholder="Paste a key (optional)" autocomplete="off" spellcheck="false"><button class="btn" data-setkey="${a.id}">Save to keychain</button></div>`}
+            `<div class="row"><input type="password" data-key="${a.id}" placeholder="${a.api ? 'Paste your nvapi- key' : 'Paste a key (optional)'}" autocomplete="off" spellcheck="false"><button class="btn" data-setkey="${a.id}">Save to keychain</button></div>`}
           <div class="hint">${esc(a.keyHint)}</div>
         </div>
       </section>`;
@@ -144,6 +159,12 @@
 
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.matches('[data-enabled]')) {
+      const id = t.dataset.enabled;
+      state.disabled = t.checked ? state.disabled.filter((x) => x !== id) : [...new Set([...state.disabled, id])];
+      if (!t.checked && state.default_agent === id) state.default_agent = null; // an agent that is off cannot be the default
+      render(); saveChoices(); return;
+    }
     if (t.name === 'def') { state.default_agent = t.value; render(); saveChoices(); return; }
     if (t.matches('[data-model]')) {
       const custom = document.querySelector(`[data-custom="${t.dataset.model}"]`);
@@ -187,7 +208,7 @@
   (async () => {
     if (!invoke) { $('cards').textContent = 'This page only works inside the Braid app.'; return; }
     state = await call('settings_get');
-    state.models ||= {}; state.key_set ||= {};
+    state.models ||= {}; state.key_set ||= {}; state.disabled ||= [];
     render();
     recheck();
   })();

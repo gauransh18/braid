@@ -30,6 +30,11 @@ export class DriverRegistry {
     return this;
   }
 
+  /** Registered names, in registration order. */
+  names(): string[] {
+    return [...this.drivers.keys()];
+  }
+
   get(name: string): Driver {
     const d = this.drivers.get(name);
     if (!d) throw new Error(`unknown driver "${name}" (have: ${[...this.drivers.keys()].join(', ')})`);

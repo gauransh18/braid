@@ -19,7 +19,12 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 /// Agent name, the environment variable its CLI reads its key from.
-pub const AGENTS: [(&str, &str); 3] = [("claude", "ANTHROPIC_API_KEY"), ("codex", "OPENAI_API_KEY"), ("gemini", "GEMINI_API_KEY")];
+pub const AGENTS: [(&str, &str); 4] = [
+    ("claude", "ANTHROPIC_API_KEY"),
+    ("codex", "OPENAI_API_KEY"),
+    ("gemini", "GEMINI_API_KEY"),
+    ("nim", "NVIDIA_API_KEY"),
+];
 
 const SERVICE: &str = "braid";
 
@@ -30,6 +35,9 @@ pub struct Settings {
     /// Model per agent name; a missing or empty entry means the CLI's own default.
     #[serde(default)]
     pub models: HashMap<String, String>,
+    /// Agents switched off: plans that need one are refused and defaults skip it.
+    #[serde(default)]
+    pub disabled: Vec<String>,
 }
 
 fn file(app: &AppHandle) -> Option<PathBuf> {
@@ -115,7 +123,7 @@ pub fn snapshot(settings: &Settings) -> Snapshot {
         key_set.insert(agent.to_string(), value.is_some());
         env.insert(name.to_string(), value.map_or(Value::Null, Value::String));
     }
-    Snapshot { payload: json!({ "env": env, "defaults": { "driver": settings.default_agent, "models": settings.models } }), key_set }
+    Snapshot { payload: json!({ "env": env, "defaults": { "driver": settings.default_agent, "models": settings.models, "disabled": settings.disabled } }), key_set }
 }
 
 /// Push settings to a running `braid watch` (loopback only, bearer token). Plain HTTP by hand: one small request.
@@ -180,6 +188,7 @@ mod tests {
     fn only_known_agents_map_to_key_variables() {
         assert_eq!(env_name("claude"), Ok("ANTHROPIC_API_KEY"));
         assert_eq!(env_name("codex"), Ok("OPENAI_API_KEY"));
+        assert_eq!(env_name("nim"), Ok("NVIDIA_API_KEY"));
         assert!(env_name("PATH").is_err());
         assert!(key_set("nope", "x").is_err());
         assert!(key_set("claude", "   ").is_err());
@@ -191,6 +200,8 @@ mod tests {
         assert_eq!(s.default_agent.as_deref(), Some("codex"));
         assert_eq!(s.models.get("codex").map(String::as_str), Some("gpt-5-codex"));
         assert_eq!(serde_json::from_str::<Settings>("{}").unwrap(), Settings::default());
+        let older: Settings = serde_json::from_str(r#"{"default_agent":"claude"}"#).unwrap();
+        assert!(older.disabled.is_empty(), "settings saved before providers could be switched off still load");
     }
 
     #[test]

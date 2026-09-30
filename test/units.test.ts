@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
 import { ClaudeDriver, parseClaudeLine } from '../src/drivers/claude.js';
+import { estimateCostUsd, priceFor } from '../src/pricing.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
 
@@ -88,7 +89,7 @@ describe('gemini driver', () => {
       { type: 'result', status: 'success', stats: {} },
     ]);
     assert.deepEqual(events.map((e) => e.kind), ['start', 'text', 'tool', 'tool_result', 'text', 'text']);
-    assert.deepEqual(res, { ok: true, text: 'All done.', costUsd: 0, sessionId: 's1' });
+    assert.deepEqual(res, { ok: true, text: 'All done.', costUsd: 0, sessionId: 's1' }, 'no stats, so no estimate');
   });
 
   it('reports failure from an error result or a missing result', () => {
@@ -97,5 +98,30 @@ describe('gemini driver', () => {
     assert.match(failed.res.text, /quota exceeded/);
     assert.equal(run([{ type: 'message', role: 'assistant', content: 'x' }], 1).res.ok, false);
     assert.equal(run([{ type: 'result', status: 'success' }], 1).res.ok, false, 'non-zero exit is failure even after a success result');
+  });
+});
+
+describe('pricing', () => {
+  it('picks the longest matching model prefix', () => {
+    assert.equal(priceFor('gemini-2.5-flash-lite-preview')?.input, 0.1);
+    assert.equal(priceFor('gemini-2.5-flash')?.input, 0.3);
+    assert.equal(priceFor('unknown-model'), undefined);
+    assert.equal(priceFor('unknown-model', 'gemini-2.5-pro')?.input, 1.25);
+  });
+
+  it('prices fresh, cached and output tokens separately', () => {
+    // 1M fresh in ($1.25) + 1M cached ($0.125) + 1M out ($10) on gemini-2.5-pro
+    const usd = estimateCostUsd([{ model: 'gemini-2.5-pro', input: 1e6, cached: 1e6, output: 1e6 }]);
+    assert.ok(Math.abs(usd - 11.375) < 1e-9);
+    assert.equal(estimateCostUsd([{ model: 'mystery', input: 1e6, output: 1e6 }]), 0);
+  });
+
+  it('turns gemini result stats into a spend estimate', () => {
+    const p = new GeminiStreamParser('gemini-2.5-flash');
+    p.feed(JSON.stringify({ type: 'init', session_id: 's', model: 'gemini-2.5-flash' }));
+    p.feed(JSON.stringify({ type: 'message', role: 'assistant', content: 'ok', delta: true }));
+    p.feed(JSON.stringify({ type: 'result', status: 'success', stats: { models: { 'gemini-2.5-flash': { input_tokens: 2_000_000, cached: 1_000_000, input: 1_000_000, output_tokens: 1_000_000 } } } }));
+    // 1M fresh @0.30 + 1M cached @0.03 + 1M out @2.50
+    assert.ok(Math.abs(p.finish(0, '').costUsd - 2.83) < 1e-9);
   });
 });

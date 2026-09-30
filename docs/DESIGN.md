@@ -77,10 +77,24 @@ containers (see the roadmap) for untrusted work.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.
 6. **Evals.** Started: `braid eval <suite.json> --variants claude:sonnet,codex` runs each case in a throwaway repo and reports pass rate, spend, $ per passing case, time and attempts per variant (`src/eval.ts`, starter suite in `evals/`). A case passes only if hidden acceptance tests, copied in after the run, pass on the integration branch, so agents cannot game it. Still to do: a larger suite of real-repo cases, repeated runs for variance, and a compare command over saved results.
-7. **More drivers.** Gemini CLI is in (`src/drivers/gemini.ts`, `driver: "gemini"`), written against the event schema in the gemini-cli 0.53 source but not yet run against a signed-in install. Workers run in `auto_edit` and reviewers in `plan`, so `allowedTools` and `maxTurns` do not apply, and spend is reported as 0 (tokens only), so `budgetUsd` does not bind it. Still to do: OpenCode, and local models through an OpenAI-compatible endpoint.
+7. **More drivers.** Gemini CLI is in (`src/drivers/gemini.ts`, `driver: "gemini"`), written against the event schema in the gemini-cli 0.53 source but not yet run against a signed-in install. Workers run in `auto_edit` and reviewers in `plan`, so `allowedTools` and `maxTurns` do not apply, and spend is estimated from token counts and list prices. Still to do: OpenCode, and local models through an OpenAI-compatible endpoint.
 8. **Replanning.** When a task fails for good, ask the planner to split or rewrite it instead of blocking its dependents.
 9. **Standalone installers for Windows and macOS.** Two steps:
    - **Single-file CLI.** Compile braid, with `ui/index.html` embedded, into one executable per platform using `bun build --compile` or Node SEA: `braid.exe` for Windows, and `braid` for macOS on both arm64 and x64. Ship through GitHub Releases, a Homebrew tap and winget. `git` and the agent CLIs stay user-installed, since they are vendor-owned and each user signs in with their own subscription. On first run, braid checks what is missing and shows how to install it.
    - **Desktop app (Tauri).** A native window around the same dashboard, with the single-file CLI bundled as a background process. Installers should be about 10-15 MB (`.msi`/`.exe`, `.dmg`), versus 100 MB or more for Electron, which munder-difflin uses. Adds a tray icon, notifications ("run done", "task failed"), a plan editor, starting runs from the UI, and Tauri's auto-updater. The watch server becomes the local API the app talks to, so it needs write endpoints (start and stop a run, edit a plan) guarded by a per-session token.
    - **Signing.** macOS needs an Apple Developer ID ($99/yr) and notarization, or Gatekeeper blocks the app. Windows needs a code-signing certificate (for example Azure Trusted Signing, about $10/mo), or SmartScreen shows an "unknown publisher" warning. Both are needed before selling.
    - **Rules until then:** no native npm modules, bundle the fonts locally instead of loading Google Fonts, and keep the core usable as a library.
+
+## Cost estimates
+
+Claude reports dollars. Codex and Gemini report only tokens, so `src/pricing.ts` turns tokens into an
+estimated cost (fresh input, cached input and output priced separately) and `budgetUsd` and `braid eval`
+use that figure. It is a list-price estimate: rates drift, an unknown model falls back to the driver's
+default (`gemini-2.5-pro`, `gpt-5-codex`), and subscription plans are not billed per token at all.
+Set `BRAID_PRICES` to a JSON file to correct or add prices:
+
+```json
+{ "gemini-2.5-pro": { "input": 1.25, "output": 10, "cachedInput": 0.125 } }
+```
+
+The Codex usage fields (`turn.completed.usage`) follow its docs and, like the driver, are untested against a live install.

@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentResult } from '../types.js';
+import { DRIVER_DEFAULT_MODEL, estimateCostUsd, type Usage } from '../pricing.js';
 import { streamLines } from '../proc.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
@@ -23,6 +24,7 @@ export class CodexDriver implements Driver {
   async run(opts: DriverRunOptions): Promise<AgentResult> {
     let lastText = '';
     let failed = false;
+    const usage: Usage[] = [];
     const emit = (e: AgentEvent) => opts.onEvent?.(e);
 
     const { code, stderr } = await streamLines(
@@ -44,14 +46,19 @@ export class CodexDriver implements Driver {
           emit({ kind: 'text', text: lastText });
         } else if (msg.type === 'item.started' && item.type === 'command_execution') {
           emit({ kind: 'tool', name: 'shell', input: item.command });
+        } else if (msg.type === 'turn.completed' && msg.usage) {
+          // input_tokens includes the cached share, which is billed at a lower rate.
+          const cached = Number(msg.usage.cached_input_tokens ?? 0);
+          usage.push({ model: opts.model, input: Math.max(0, Number(msg.usage.input_tokens ?? 0) - cached), cached, output: Number(msg.usage.output_tokens ?? 0) });
         } else if (msg.type === 'turn.failed' || msg.type === 'error') failed = true;
       },
     );
 
     const ok = code === 0 && !failed;
     const text = ok ? lastText : `${lastText}\n${stderr.trim().slice(-2000)}`.trim();
-    // Codex does not report spend in exec mode; budget accounting treats it as 0.
-    emit({ kind: 'result', ok, text, costUsd: 0 });
-    return { ok, text, costUsd: 0 };
+    // Codex reports tokens, not dollars; spend is estimated from list prices (see pricing.ts).
+    const costUsd = estimateCostUsd(usage, DRIVER_DEFAULT_MODEL.codex);
+    emit({ kind: 'result', ok, text, costUsd });
+    return { ok, text, costUsd };
   }
 }

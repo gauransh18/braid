@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentResult } from '../types.js';
+import { DRIVER_DEFAULT_MODEL, estimateCostUsd, type Usage } from '../pricing.js';
 import { streamLines } from '../proc.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
@@ -8,8 +9,8 @@ import type { Driver, DriverRunOptions } from './driver.js';
  *
  * Tool control is coarser than Claude's: workers run in `auto_edit` (file edits auto-approved, anything
  * else, including shell, is denied because nobody can answer a prompt) and reviewers in `plan` (read-only).
- * `allowedTools` and `maxTurns` are therefore ignored. Gemini reports tokens, not dollars, so spend is 0
- * and `budgetUsd` does not bind this driver.
+ * `allowedTools` and `maxTurns` are therefore ignored. Gemini reports tokens, not dollars, so spend is
+ * estimated from list prices (see pricing.ts); it is approximate, and 0 for models with no known price.
  */
 export class GeminiDriver implements Driver {
   readonly name = 'gemini';
@@ -25,7 +26,7 @@ export class GeminiDriver implements Driver {
   }
 
   async run(opts: DriverRunOptions): Promise<AgentResult> {
-    const parser = new GeminiStreamParser();
+    const parser = new GeminiStreamParser(opts.model);
     const emit = (e: AgentEvent) => opts.onEvent?.(e);
 
     const { code, stderr } = await streamLines(
@@ -45,7 +46,11 @@ export class GeminiDriver implements Driver {
 
 /** Stateful because Gemini streams the answer as deltas and only reports success at the very end. */
 export class GeminiStreamParser {
+  constructor(private readonly requestedModel?: string) {}
+
   private sessionId?: string;
+  private model?: string;
+  private usage: Usage[] = [];
   /** Assistant text since the last tool call: the final answer, not the narration between tools. */
   private answer = '';
   private status?: 'success' | 'error';
@@ -61,6 +66,7 @@ export class GeminiStreamParser {
     switch (msg.type) {
       case 'init':
         this.sessionId = msg.session_id;
+        this.model = msg.model;
         return [{ kind: 'start', sessionId: msg.session_id, model: msg.model }];
       case 'message':
         if (msg.role !== 'assistant' || typeof msg.content !== 'string') return [];
@@ -79,6 +85,7 @@ export class GeminiStreamParser {
         return [];
       case 'result':
         this.status = msg.status === 'success' ? 'success' : 'error';
+        this.usage = usageFromStats(msg.stats, this.model ?? this.requestedModel);
         if (msg.error?.message) this.errorText += `${msg.error.message}\n`;
         return [];
       default:
@@ -89,6 +96,20 @@ export class GeminiStreamParser {
   finish(exitCode: number, stderr: string): AgentResult {
     const ok = exitCode === 0 && this.status === 'success';
     const text = ok ? this.answer.trim() : [this.answer.trim(), this.errorText.trim(), stderr.trim().slice(-1500)].filter(Boolean).join('\n');
-    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: 0, sessionId: this.sessionId };
+    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: estimateCostUsd(this.usage, this.requestedModel ?? DRIVER_DEFAULT_MODEL.gemini), sessionId: this.sessionId };
   }
+}
+
+/** `stats.models` maps model name to token counts; `input_tokens` includes cached, `input` does not. */
+export function usageFromStats(stats: any, fallbackModel?: string): Usage[] {
+  const models = stats?.models;
+  if (models && typeof models === 'object' && Object.keys(models).length) {
+    return Object.entries<any>(models).map(([model, m]) => {
+      const cached = Number(m.cached ?? 0);
+      return { model, input: Number(m.input ?? Math.max(0, Number(m.input_tokens ?? 0) - cached)), cached, output: Number(m.output_tokens ?? 0) };
+    });
+  }
+  if (!stats) return [];
+  const cached = Number(stats.cached ?? 0);
+  return [{ model: fallbackModel, input: Number(stats.input ?? Math.max(0, Number(stats.input_tokens ?? 0) - cached)), cached, output: Number(stats.output_tokens ?? 0) }];
 }

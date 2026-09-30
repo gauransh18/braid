@@ -126,6 +126,29 @@ pub fn snapshot(settings: &Settings) -> Snapshot {
     Snapshot { payload: json!({ "env": env, "defaults": { "driver": settings.default_agent, "models": settings.models, "disabled": settings.disabled } }), key_set }
 }
 
+fn models_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("models.json"))
+}
+
+/// The last live model list per provider, so Settings can show something instantly. Refreshed at every launch.
+pub fn load_models(app: &AppHandle) -> serde_json::Map<String, Value> {
+    models_file(app)
+        .and_then(|f| fs::read_to_string(f).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+pub fn store_models(app: &AppHandle, provider: &str, entry: Value) {
+    let Some(path) = models_file(app) else { return };
+    let mut all = load_models(app);
+    all.insert(provider.to_string(), entry);
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(path, Value::Object(all).to_string());
+}
+
 /// Push settings to a running `braid watch` (loopback only, bearer token). Plain HTTP by hand: one small request.
 pub fn push(port: u16, token: &str, body: &Value) -> Result<(), String> {
     let text = body.to_string();

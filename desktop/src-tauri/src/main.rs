@@ -473,10 +473,96 @@ fn push_to_sessions(app: &AppHandle, payload: &serde_json::Value) {
     }
 }
 
+/// Run a bundled `braid` subcommand that prints one JSON document. The provider's key (if any) goes in the
+/// environment, never the command line.
+async fn sidecar_json(app: &AppHandle, args: Vec<String>, key: Option<(&'static str, String)>) -> Result<serde_json::Value, String> {
+    let mut command = app.shell().sidecar("braid").map_err(|e| e.to_string())?.env("PATH", user_path()).args(args);
+    if let Some((name, value)) = key {
+        command = command.env(name, value);
+    }
+    let out = command.output().await.map_err(|e| e.to_string())?;
+    serde_json::from_slice(&out.stdout).map_err(|_| format!("unreadable answer: {}", String::from_utf8_lossy(&out.stderr).trim()))
+}
+
+fn provider_key(app: &AppHandle, provider: &str) -> Result<Option<(&'static str, String)>, String> {
+    let name = settings::env_name(provider)?;
+    let value = snapshot(app).payload["env"][name].as_str().map(str::to_string);
+    Ok(value.map(|v| (name, v)))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Fetch a provider's live model list and cache it. Falls back to the cached list (marked stale) on failure.
+async fn refresh_models(app: &AppHandle, provider: &str) -> Result<serde_json::Value, String> {
+    let key = provider_key(app, provider)?;
+    let mut fresh = sidecar_json(app, vec!["models".into(), provider.into(), "--json".into()], key).await?;
+    fresh["at"] = serde_json::json!(now_secs());
+    if fresh["source"] == "live" {
+        settings::store_models(app, provider, fresh.clone());
+        return Ok(fresh);
+    }
+    // Could not refresh: keep showing the last good list, but say it is old and why.
+    if let Some(mut old) = settings::load_models(app).get(provider).cloned() {
+        old["stale"] = serde_json::json!(true);
+        old["error"] = fresh["error"].clone();
+        return Ok(old);
+    }
+    Ok(fresh)
+}
+
+/// Models for a provider: the cached list straight away, or a fresh fetch when `refresh` is true.
+#[tauri::command]
+async fn settings_models(app: AppHandle, provider: String, refresh: bool) -> Result<serde_json::Value, String> {
+    settings::env_name(&provider)?;
+    if refresh {
+        return refresh_models(&app, &provider).await;
+    }
+    Ok(settings::load_models(&app).get(&provider).cloned().unwrap_or_else(|| serde_json::json!({ "provider": provider, "source": "none", "models": [] })))
+}
+
+/// Check a provider's key, connection, model and (for NIM) tool calling.
+#[tauri::command]
+async fn settings_test(app: AppHandle, provider: String, model: Option<String>) -> Result<serde_json::Value, String> {
+    let key = provider_key(&app, &provider)?;
+    let mut args = vec!["test-provider".to_string(), provider.clone(), "--json".to_string()];
+    if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+        if m.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            return Err("that does not look like a model name".into());
+        }
+        args.extend(["--model".to_string(), m]);
+    }
+    let result = sidecar_json(&app, args, key).await?;
+    if result["ok"] == true {
+        // The connection works, so take the chance to refresh this provider's list.
+        let _ = refresh_models(&app, &provider).await;
+    }
+    Ok(result)
+}
+
+/// Refresh every provider that has a key, once, in the background. Runs at launch.
+fn refresh_all_models(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        for (provider, _) in settings::AGENTS {
+            if matches!(provider_key(&app, provider), Ok(Some(_))) {
+                let _ = refresh_models(&app, provider).await;
+            }
+        }
+    });
+}
+
 #[tauri::command]
 fn settings_set_key(app: AppHandle, agent: String, value: String) -> Result<(), String> {
     settings::key_set(&agent, &value)?;
-    thread::spawn(move || refresh_and_push(&app));
+    thread::spawn(move || {
+        refresh_and_push(&app);
+        // A new key unlocks that provider's live model list.
+        let app2 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = refresh_models(&app2, &agent).await;
+        });
+    });
     Ok(())
 }
 
@@ -562,6 +648,8 @@ fn main() {
             settings_get,
             settings_agents,
             settings_save,
+            settings_models,
+            settings_test,
             settings_set_key,
             settings_clear_key
         ])
@@ -634,6 +722,7 @@ fn main() {
                 .build(app)?;
             app.manage(TrayState { status, tray });
             start_monitor(app.handle().clone());
+            refresh_all_models(app.handle().clone());
             #[cfg(target_os = "macos")]
             dock::install(app.handle().clone());
 

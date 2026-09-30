@@ -48,6 +48,14 @@
   .saved { color: var(--ok); font-size: 13px; }
   code { font-family: ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 12px; user-select: all; }
   .install { margin-top: 12px; padding: 10px 12px; background: var(--bg); border: 1px dashed var(--line-2); border-radius: 8px; font-size: 13px; }
+  .steps { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+  .steps li { padding: 3px 0; display: flex; gap: 8px; }
+  .steps .good { color: var(--ok); } .steps .bad { color: var(--err); }
+  .steps small { color: var(--muted); }
+  .srcline { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .srcline.warn { color: var(--warn); }
+  .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+  input[list] { flex: 1 1 280px; font-family: inherit; }
   #msg { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 80vw; }
   #msg.show { opacity: 1; }
   #msg.bad { background: var(--err); color: #fff; }
@@ -58,7 +66,7 @@
   <header><h1>Settings</h1><button class="btn" id="recheck">Recheck agents</button></header>
   <p class="lede">The coding agents braid can use, which one runs by default, and which model each uses. Switch off any you do not want braid to use. These apply to new runs in every window.</p>
   <div id="cards"></div>
-  <p class="foot">Runs already in progress keep the agent and model they started with. Not seeing a model? Choose <b>Custom...</b> and type its name exactly as the provider spells it. Other OpenAI-compatible providers and local models are planned.</p>
+  <p class="foot">Runs already in progress keep the agent and model they started with. Type or pick a model; the suggestions are the provider's live list once a key is saved. Leave it empty for the CLI's own default. Other OpenAI-compatible providers and local models are planned.</p>
   <div id="msg" role="status"></div>
 
 <script>
@@ -70,23 +78,66 @@
     { id: 'claude', name: 'Claude Code', provider: 'Anthropic', install: 'npm install -g @anthropic-ai/claude-code',
       key: 'Anthropic API key',
       keyHint: 'Leave empty to use your Claude sign-in (run claude once in a terminal). A key bills the Anthropic API instead of a Claude subscription.',
-      models: [['', 'CLI default'], ['opus', 'Opus (latest)'], ['sonnet', 'Sonnet (latest)'], ['haiku', 'Haiku (latest)'], ['claude-fable-5-1', 'Fable 5.1'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-4-5-20251001', 'Haiku 4.5']] },
+      defaultLabel: 'CLI default',
+      // These names always point at the newest of their family, so they never go stale.
+      aliases: [['opus', 'Opus (always the newest)'], ['sonnet', 'Sonnet (always the newest)'], ['haiku', 'Haiku (always the newest)']],
+      models: [['claude-fable-5-1', 'Fable 5.1'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-4-5-20251001', 'Haiku 4.5']] },
     { id: 'codex', name: 'Codex', provider: 'OpenAI', install: 'npm install -g @openai/codex',
       key: 'OpenAI API key',
       keyHint: 'Leave empty to use your ChatGPT sign-in (run codex login in a terminal). A key bills the OpenAI API instead of a ChatGPT plan.',
-      models: [['', 'CLI default'], ['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex'], ['gpt-5-codex', 'GPT-5 Codex'], ['codex-mini', 'Codex mini']] },
+      defaultLabel: 'CLI default',
+      aliases: [],
+      models: [['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex'], ['gpt-5-codex', 'GPT-5 Codex'], ['codex-mini', 'Codex mini']] },
     { id: 'nim', name: 'NVIDIA NIM', provider: 'NVIDIA', api: true,
       key: 'NVIDIA API key (required)',
       keyHint: 'Create one at build.nvidia.com (it starts with nvapi-). braid runs the agent loop itself against NVIDIA\'s OpenAI-compatible API, so pick a model that supports tool calling. Tokens are always tracked; dollars only if you set prices in a BRAID_PRICES file.',
-      models: [['', 'meta/llama-3.3-70b-instruct (default)'], ['meta/llama-3.1-405b-instruct', 'Llama 3.1 405B Instruct'], ['qwen/qwen3-coder-480b-a35b-instruct', 'Qwen3 Coder 480B'], ['moonshotai/kimi-k2-instruct', 'Kimi K2 Instruct'], ['openai/gpt-oss-120b', 'gpt-oss 120B'], ['nvidia/llama-3.3-nemotron-super-49b-v1', 'Nemotron Super 49B']] },
+      defaultLabel: 'meta/llama-3.3-70b-instruct (default)',
+      aliases: [],
+      // Only a starting point until the live list loads (every time Braid starts, and on Refresh).
+      models: [['meta/llama-3.3-70b-instruct', 'Llama 3.3 70B Instruct'], ['meta/llama-3.1-405b-instruct', 'Llama 3.1 405B Instruct'], ['nvidia/llama-3.3-nemotron-super-49b-v1', 'Nemotron Super 49B']] },
     { id: 'gemini', name: 'Gemini CLI', provider: 'Google', install: 'npm install -g @google/gemini-cli',
       key: 'Gemini API key',
       keyHint: 'Leave empty to use the CLI\'s own Google sign-in. A key from Google AI Studio works when that sign-in is not available to you.',
-      models: [['', 'CLI default'], ['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite']] },
+      defaultLabel: 'CLI default',
+      aliases: [],
+      models: [['gemini-2.5-pro', 'Gemini 2.5 Pro'], ['gemini-2.5-flash', 'Gemini 2.5 Flash'], ['gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite']] },
   ];
 
   // Hosted APIs after the CLIs.
   AGENTS.push(AGENTS.splice(AGENTS.findIndex((a) => a.id === 'nim'), 1)[0]);
+
+  const lists = {};   // provider -> { models, source, at, error, stale }
+  const tests = {};   // provider -> { running, result }
+  const ago = (at) => { if (!at) return ''; const m = Math.round((Date.now() / 1000 - at) / 60); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  function modelOptions(a) {
+    const live = lists[a.id];
+    const names = live?.models?.length ? live.models.map((id) => [id, '']) : a.models;
+    return [...a.aliases, ...names].map(([v, label]) => `<option value="${esc(v)}" label="${esc(label)}"></option>`).join('');
+  }
+  function srcText(a) {
+    const l = lists[a.id];
+    const keyed = !!state.key_set[a.id];
+    if (l?.stale) return { text: `Could not refresh (${esc(l.error || 'unknown error')}). Showing the list from ${ago(l.at)}.`, warn: true };
+    if (l?.source === 'live') return { text: `Live list from ${esc(a.provider)}: ${l.models.length} models, updated ${ago(l.at)}.`, warn: false };
+    if (l?.error && keyed) return { text: esc(l.error), warn: true };
+    return { text: keyed ? 'Loading the live model list...' : `Showing common names. Add an API key to load ${esc(a.provider)}'s live list, refreshed every time Braid starts.`, warn: false };
+  }
+  function testHtml(id) {
+    const t = tests[id];
+    if (!t) return '';
+    if (t.running) return '<li>Testing...</li>';
+    return t.result.steps.map((st) => `<li><span class="${st.ok ? 'good' : 'bad'}">${st.ok ? '&#10003;' : '&#10007;'}</span><span>${esc(st.name)}<br><small>${esc(st.detail)}${st.ms ? ' (' + st.ms + ' ms)' : ''}</small></span></li>`).join('');
+  }
+  /** Update one card's model suggestions and status line without redrawing (and stealing focus from) the page. */
+  function updateModelMeta(id) {
+    const a = AGENTS.find((x) => x.id === id);
+    const dl = document.getElementById('dl-' + id); if (dl) dl.innerHTML = modelOptions(a);
+    const src = document.querySelector(`[data-src="${id}"]`); if (src) { const t = srcText(a); src.innerHTML = t.text; src.classList.toggle('warn', t.warn); }
+  }
+  async function loadModels(id, refresh) {
+    try { lists[id] = await call('settings_models', { provider: id, refresh }); } catch (e) { lists[id] = { source: 'none', models: [], error: String(e) }; }
+    updateModelMeta(id);
+  }
 
   let state = { default_agent: null, models: {}, key_set: {}, disabled: [] };
   let status = {}; // agent id -> { ok, version, install }
@@ -101,9 +152,7 @@
   function collectModels() {
     const models = {};
     for (const a of AGENTS) {
-      const sel = document.querySelector(`[data-model="${a.id}"]`);
-      if (!sel) continue;
-      const value = sel.value === '__custom' ? document.querySelector(`[data-custom="${a.id}"]`).value.trim() : sel.value;
+      const value = document.querySelector(`[data-model="${a.id}"]`)?.value.trim();
       if (value) models[a.id] = value;
     }
     return models;
@@ -141,17 +190,18 @@
           <button class="btn" data-copy="${esc(a.install)}">Copy command</button></div>` : ''}
         <div class="field"><label for="m-${a.id}">Model</label>
           <div class="row">
-            <select id="m-${a.id}" data-model="${a.id}">
-              ${a.models.map(([v, label]) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(label)}${v ? ' (' + esc(v) + ')' : ''}</option>`).join('')}
-              <option value="__custom" ${current && !known ? 'selected' : ''}>Custom...</option>
-            </select>
-            <input type="text" data-custom="${a.id}" placeholder="model name" value="${current && !known ? esc(current) : ''}" ${current && !known ? '' : 'hidden'} autocomplete="off" spellcheck="false">
+            <input type="text" id="m-${a.id}" list="dl-${a.id}" data-model="${a.id}" value="${esc(current)}" placeholder="${esc(a.defaultLabel)}" autocomplete="off" spellcheck="false">
+            <button class="btn" data-refresh="${a.id}" title="Fetch the current model list from ${esc(a.provider)}">Refresh list</button>
           </div>
+          <datalist id="dl-${a.id}">${modelOptions(a)}</datalist>
+          <div class="srcline" data-src="${a.id}">${srcText(a).text}</div>
         </div>
         <div class="field"><span class="lab">${esc(a.key)}</span>
           ${keyOn ? `<div class="row"><span class="saved">&#10003; Saved in your keychain</span><button class="btn danger" data-clear="${a.id}">Remove</button></div>` :
             `<div class="row"><input type="password" data-key="${a.id}" placeholder="${a.api ? 'Paste your nvapi- key' : 'Paste a key (optional)'}" autocomplete="off" spellcheck="false"><button class="btn" data-setkey="${a.id}">Save to keychain</button></div>`}
           <div class="hint">${esc(a.keyHint)}</div>
+          <div class="row" style="margin-top:10px"><button class="btn" data-test="${a.id}">Test connection</button><span class="hint" data-testnote="${a.id}" style="margin:0">${a.api ? 'Sends one tiny request to check the key, the model and tool calling.' : 'Checks the key and the connection (free).'}</span></div>
+          <ul class="steps" data-testout="${a.id}">${testHtml(a.id)}</ul>
         </div>
       </section>`;
     }).join('');
@@ -166,20 +216,30 @@
       render(); saveChoices(); return;
     }
     if (t.name === 'def') { state.default_agent = t.value; render(); saveChoices(); return; }
-    if (t.matches('[data-model]')) {
-      const custom = document.querySelector(`[data-custom="${t.dataset.model}"]`);
-      custom.hidden = t.value !== '__custom';
-      if (t.value === '__custom') custom.focus(); else saveChoices();
-    }
-    if (t.matches('[data-custom]')) saveChoices();
+    if (t.matches('[data-model]')) saveChoices();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.matches('[data-custom]')) saveChoices();
+    if (e.key === 'Enter' && e.target.matches('[data-model]')) saveChoices();
     if (e.key === 'Enter' && e.target.matches('[data-key]')) document.querySelector(`[data-setkey="${e.target.dataset.key}"]`).click();
   });
   document.addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.copy) { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Select the command and copy it', true); } }
+    if (b.dataset.refresh) {
+      const id = b.dataset.refresh; b.disabled = true;
+      const src = document.querySelector(`[data-src="${id}"]`); if (src) src.textContent = 'Refreshing...';
+      await loadModels(id, true); b.disabled = false;
+    }
+    if (b.dataset.test) {
+      const id = b.dataset.test; b.disabled = true;
+      tests[id] = { running: true }; document.querySelector(`[data-testout="${id}"]`).innerHTML = testHtml(id);
+      try {
+        const model = document.querySelector(`[data-model="${id}"]`)?.value.trim() || null;
+        tests[id] = { result: await call('settings_test', { provider: id, model }) };
+        if (tests[id].result.ok) await loadModels(id, false); // a successful test also refreshed the cache
+      } catch (err) { tests[id] = { result: { ok: false, steps: [{ name: 'Test', ok: false, detail: String(err) }] } }; }
+      document.querySelector(`[data-testout="${id}"]`).innerHTML = testHtml(id); b.disabled = false;
+    }
     if (b.dataset.setkey) {
       const id = b.dataset.setkey; const input = document.querySelector(`[data-key="${id}"]`);
       const value = input.value; input.value = ''; // never leave the key sitting in the page
@@ -211,6 +271,9 @@
     state.models ||= {}; state.key_set ||= {}; state.disabled ||= [];
     render();
     recheck();
+    // Cached lists show instantly; then every provider with a key is refreshed from its API.
+    await Promise.all(AGENTS.map((a) => loadModels(a.id, false)));
+    for (const a of AGENTS) if (state.key_set[a.id]) loadModels(a.id, true);
   })();
 </script>
 </body>

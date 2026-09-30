@@ -11,6 +11,7 @@ import { NIM_DEFAULT_MODEL, OpenAICompatDriver } from './drivers/openai-compat.j
 import { createDemoRun } from './demo.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
+import { fetchModels, isProvider, testProvider } from './models.js';
 import { randomBytes } from 'node:crypto';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens, formatCost } from './tokens.js';
@@ -31,6 +32,9 @@ Usage:
                                  live dashboard for this repo's runs; --control adds start/stop/resume
                                  buttons, guarded by a per-session token (BRAID_CONTROL_TOKEN or generated)
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
+  braid models <provider> [--json]     live model list (claude|codex|gemini|nim); key from the environment
+  braid test-provider <provider> [--model M] [--json]
+                                 check a provider's key, reachability and model
   braid doctor [--json]          check that git and an agent CLI are installed
   braid status [runId]
   braid runs
@@ -157,6 +161,16 @@ async function main(argv: string[]): Promise<number> {
     console.log(`
 demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     await new Promise(() => undefined);
+  }
+
+  if (cmd === 'models' || cmd === 'test-provider') {
+    if (!arg || !isProvider(arg)) throw new Error('name a provider: claude, codex, gemini or nim');
+    // Keys arrive in the environment (never argv). Output is JSON for the desktop app, or a short summary.
+    const result = cmd === 'models' ? await fetchModels(arg) : await testProvider(arg, values.model);
+    if (values.json) console.log(JSON.stringify(result));
+    else if ('steps' in result) for (const st of result.steps) console.log(`${st.ok ? 'ok  ' : 'FAIL'} ${st.name}: ${st.detail}`);
+    else console.log(result.source === 'live' ? result.models.join('\n') : result.error);
+    return cmd === 'models' ? 0 : 'steps' in result && result.ok ? 0 : 1;
   }
 
   if (cmd === 'doctor') {

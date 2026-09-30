@@ -1,5 +1,7 @@
-# Builds a single-file braid executable per platform and attaches them to a GitHub release.
-# Trigger: push a tag like v0.2.0. Not yet exercised on GitHub.
+# Builds single-file braid executables and attaches them to a GitHub release.
+# Trigger: push a tag like v0.2.0. One Linux job builds every platform: bun cross-compiles
+# (macOS arm64 and x64, Windows x64, Linux x64), so there are no per-OS runners to keep alive.
+# The desktop app (.dmg) is not built here; it is built and attached by hand for now.
 name: release
 on:
   push:
@@ -8,14 +10,7 @@ permissions:
   contents: write
 jobs:
   binaries:
-    strategy:
-      matrix:
-        include:
-          - { os: macos-14, file: braid-darwin-arm64 }
-          - { os: macos-13, file: braid-darwin-x64 }
-          - { os: windows-latest, file: braid-windows-x64.exe }
-          - { os: ubuntu-latest, file: braid-linux-x64 }
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,12 +18,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: npm ci
       - run: npm test
-      - run: npm run build:binary
-      - name: Checksum
-        shell: bash
-        run: cd dist/bin && (sha256sum ${{ matrix.file }} 2>/dev/null || shasum -a 256 ${{ matrix.file }}) > ${{ matrix.file }}.sha256
+      - run: npm run build:binary -- --all
+      - name: Checksums
+        run: cd dist/bin && sha256sum braid-* > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: |
-            dist/bin/${{ matrix.file }}
-            dist/bin/${{ matrix.file }}.sha256
+            dist/bin/braid-*
+            dist/bin/SHA256SUMS

@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build:binary": "node scripts/build-binary.mjs"
+    "build:binary": "node scripts/build-binary.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,19 @@
+[package]
+name = "braid-desktop"
+version = "0.1.0"
+description = "Desktop window for braid"
+edition = "2021"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

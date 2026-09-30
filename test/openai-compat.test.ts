@@ -215,6 +215,25 @@ describe('openai-compatible driver', () => {
     }
   });
 
+  it('reports a model that never answers as slow, not as a connection failure', async () => {
+    const silent = createServer(() => undefined); // accepts the request, never replies
+    await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
+    const url = `http://127.0.0.1:${(silent.address() as { port: number }).port}/v1`;
+    try {
+      const events: AgentEvent[] = [];
+      const driver = new OpenAICompatDriver({ name: 'nim', label: 'NVIDIA NIM', baseUrl: url, keyEnv: KEY_ENV, defaultModel: 'm', retryDelayMs: 1, requestTimeoutMs: 100 });
+      const started = Date.now();
+      const res = await driver.run({ prompt: 'p', cwd: worktree(), allowedTools: ['Read'], canEdit: true, onEvent: (e) => events.push(e) });
+      assert.ok(Date.now() - started < 1500, 'gave up after one retry instead of four');
+      assert.equal(res.ok, false);
+      assert.match(res.text, /NVIDIA NIM did not answer within/);
+      assert.match(res.text, /smaller model/);
+    } finally {
+      silent.closeAllConnections();
+      await new Promise((r) => silent.close(r));
+    }
+  });
+
   it('retries rate limits and server errors, then succeeds', async () => {
     const api = await fakeApi([{ status: 429, body: 'slow down' }, { status: 503, body: 'try later' }, { body: say('finally') }]);
     try {

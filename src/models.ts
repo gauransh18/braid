@@ -150,7 +150,14 @@ export interface TestResult {
  * NIM, where braid drives the model itself) that the model accepts tool calls. The last step sends one tiny
  * request; the rest are free.
  */
-export async function testProvider(provider: Provider, model: string | undefined, env: Env = process.env, fetchImpl: Fetch = fetch): Promise<TestResult> {
+export async function testProvider(
+  provider: Provider,
+  model: string | undefined,
+  env: Env = process.env,
+  fetchImpl: Fetch = fetch,
+  /** How long the model gets to answer the one tiny request. Hosted models can queue, so this is generous. */
+  chatTimeoutMs = 90_000,
+): Promise<TestResult> {
   const ep = ENDPOINTS[provider];
   const steps: TestStep[] = [];
   const done = (): TestResult => ({ provider, ok: steps.every((s) => s.ok), steps });
@@ -200,15 +207,28 @@ export async function testProvider(provider: Provider, model: string | undefined
           tool_choice: 'auto',
           max_tokens: 32,
         }),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(chatTimeoutMs),
       });
       const text = await res.text();
       const ms = Date.now() - started;
-      if (res.ok) steps.push({ name: 'Model answers and accepts tool calls', ok: true, detail: `${use} works with braid's tools.`, ms });
+      if (res.ok) {
+        // Correct but slow is still a pass; say so, because every turn of a run waits this long.
+        const slow = ms > 20_000 ? ` It answered slowly (${Math.round(ms / 1000)} s), and a run asks the model many times, so a faster model will finish sooner.` : '';
+        steps.push({ name: 'Model answers and accepts tool calls', ok: true, detail: `${use} works with braid's tools.${slow}`, ms });
+      }
       else if (res.status === 400 && /tool|function/i.test(text)) steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: `${use} does not support tool calling, which braid needs. Pick another model.`, ms });
       else steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: explain(provider, res.status, text), ms });
     } catch (err) {
-      steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: `Could not reach ${ep.label}: ${(err as Error).message}` });
+      const timedOut = (err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError';
+      steps.push({
+        name: 'Model answers and accepts tool calls',
+        ok: false,
+        ms: Date.now() - started,
+        // Reaching the model list already worked, so this is not a connection or key problem.
+        detail: timedOut
+          ? `${ep.label} is reachable and listed ${use}, but it did not answer within ${Math.round(chatTimeoutMs / 1000)} s. Hosted models can be queued or slow to start, especially large ones. Try again, or pick a smaller model (for example meta/llama-3.3-70b-instruct).`
+          : `Could not reach ${ep.label}: ${(err as Error).message}`,
+      });
     }
   }
   return done();

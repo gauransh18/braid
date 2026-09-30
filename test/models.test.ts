@@ -146,6 +146,28 @@ describe('provider test', () => {
     assert.match(c.steps.at(-1)!.detail, /rejected the API key/);
   });
 
+  it('says a model that does not answer in time is slow, not unreachable, and passes a slow-but-correct one', async () => {
+    const hang = await nimApi(() => ({ body: new Promise(() => undefined) as never }));
+    // A server that accepts the request and never replies.
+    const silent = createServer((req, res) => {
+      if (req.url!.endsWith('/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ id: 'big/slow-model' }] }));
+      } // the chat request is left hanging
+    });
+    await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
+    servers.push(silent);
+    const url = `http://127.0.0.1:${(silent.address() as { port: number }).port}/v1`;
+    const res = await testProvider('nim', 'big/slow-model', envFor('nim', url), fetch, 150);
+    assert.equal(res.ok, false);
+    const last = res.steps.at(-1)!;
+    assert.match(last.detail, /reachable and listed big\/slow-model, but it did not answer within/);
+    assert.match(last.detail, /pick a smaller model/);
+    assert.ok(!/Could not reach/.test(last.detail), 'not reported as a connection failure');
+    assert.ok(res.steps.slice(0, 3).every((s) => s.ok), 'the key, the connection and the model listing all passed');
+    void hang;
+  });
+
   it('for CLI providers only checks the key and connection, and explains the no-key case', async () => {
     const server = await api(() => ({ body: { data: [{ id: 'claude-sonnet-5-5' }] } }));
     const ok = await testProvider('claude', 'claude-sonnet-5-5', envFor('claude', server.url));

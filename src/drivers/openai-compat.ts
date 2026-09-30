@@ -19,6 +19,8 @@ export interface OpenAICompatConfig {
   label?: string;
   /** Base delay between retries of rate-limit and server errors. Tests shorten it. */
   retryDelayMs?: number;
+  /** How long one request may take before it is abandoned. Default 180 s. */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -105,7 +107,9 @@ export class OpenAICompatDriver implements Driver {
   private async chat(key: string, body: unknown, signal?: AbortSignal): Promise<any> {
     const label = this.cfg.label ?? this.cfg.name;
     const delay = this.cfg.retryDelayMs ?? 1500;
+    const timeoutMs = this.cfg.requestTimeoutMs ?? 180_000;
     let lastError = '';
+    let timeouts = 0;
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt) await sleep(delay * attempt, signal);
       let res: Response;
@@ -114,11 +118,16 @@ export class OpenAICompatDriver implements Driver {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
           body: JSON.stringify(body),
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         });
       } catch (err) {
         if (signal?.aborted) throw new Error('aborted');
-        lastError = `Could not reach ${label}: ${(err as Error).message}`;
+        const timedOut = (err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError';
+        lastError = timedOut
+          ? `${label} did not answer within ${Math.round(timeoutMs / 1000)} s. The model may be queued or too large for the hosted service; try again or pick a smaller model in Settings.`
+          : `Could not reach ${label}: ${(err as Error).message}`;
+        // A model that sat silent for the whole timeout will usually do it again; do not stall a run for minutes retrying.
+        if (timedOut && ++timeouts >= 2) throw new Error(lastError);
         continue;
       }
       const text = await res.text();

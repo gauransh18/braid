@@ -65,7 +65,13 @@ braid watch                               # dashboard for this repo's runs (any 
 braid demo                                # scripted mock run, no agents, no spend
 ```
 
-The dashboard opens at `http://127.0.0.1:4777`. It is read-only and only listens on this machine.
+The dashboard opens at `http://127.0.0.1:4777`. It only listens on this machine and is read-only by default.
+
+`braid watch --control` (and the desktop app) adds **New run**, **Stop** and **Resume** buttons: draft a plan from a
+goal or load one from `plans/`, edit it, set a spend cap, start it. One run is active at a time. These endpoints can
+start agents, so they need a per-session token (from `BRAID_CONTROL_TOKEN`, or generated and printed as `#token=...`
+after the URL; it never travels in argv or the request URL), they refuse requests from other origins, and a run started
+this way must have a `budgetUsd`. Reading runs and transcripts does not need the token.
 It shows:
 
 - **The floor:** each agent is a pixel blob at a desk. Its mood follows its task: asleep while pending, typing while running, a magnifier while verifying, glasses while reviewing, jumping while merging, happy when done, flattened when failed, tied up when blocked. The lines between desks are dependencies.

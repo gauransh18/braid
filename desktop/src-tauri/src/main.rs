@@ -40,6 +40,13 @@ fn save_repo(app: &AppHandle, repo: &Path) {
     }
 }
 
+/// 192 random bits as hex. The page uses it to authorize start/stop/resume requests to the local server.
+fn session_token() -> Result<String, String> {
+    let mut bytes = [0u8; 24];
+    getrandom::getrandom(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 fn free_port() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
@@ -63,11 +70,14 @@ fn open_repo(app: &AppHandle, repo: &Path) -> Result<(), String> {
         let _ = old.kill();
     }
     let port = free_port()?;
+    let token = session_token()?;
     let (mut rx, child) = app
         .shell()
         .sidecar("braid")
         .map_err(|e| e.to_string())?
-        .args(["watch", "--port", &port.to_string()])
+        // The token goes in the environment, not argv, so it does not show up in `ps`.
+        .env("BRAID_CONTROL_TOKEN", &token)
+        .args(["watch", "--control", "--port", &port.to_string()])
         .current_dir(repo)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -104,7 +114,8 @@ fn open_repo(app: &AppHandle, repo: &Path) -> Result<(), String> {
 
     *app.state::<Server>().0.lock().unwrap() = Some(child);
     save_repo(app, repo);
-    let url = Url::parse(&format!("http://127.0.0.1:{port}/")).map_err(|e| e.to_string())?;
+    // The token rides in the URL fragment, which is never sent to the server or written to logs.
+    let url = Url::parse(&format!("http://127.0.0.1:{port}/#token={token}")).map_err(|e| e.to_string())?;
     let window = app.get_webview_window("main").ok_or("no window")?;
     window.navigate(url).map_err(|e| e.to_string())?;
     let name = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

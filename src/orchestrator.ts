@@ -41,6 +41,7 @@ export class Orchestrator {
   private state!: RunState;
   private integrationDir!: string;
   private sandbox?: Sandbox;
+  private resumeEvent?: Record<string, unknown>;
   private mergeChain: Promise<unknown> = Promise.resolve();
   private saveChain: Promise<void> = Promise.resolve();
   private saveQueued = false;
@@ -118,13 +119,13 @@ export class Orchestrator {
     }
     this.state.pid = process.pid;
     await this.runSetup(this.integrationDir);
-    if (!this.opts.resume) {
-      this.store.event('run_start', { base: this.state.base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
-    }
+    // Persist before announcing: anyone who reacts to run_start by reading state.json must see this run, not a stale one.
+    await this.save();
+    if (this.resumeEvent) this.store.event('run_resume', this.resumeEvent);
+    else this.store.event('run_start', { base: this.state.base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
     if (this.sandbox) {
       this.store.event('sandbox', { runtime: this.sandbox.runtime, image: this.sandbox.spec.image, agent: !!this.sandbox.spec.agent });
     }
-    await this.save();
 
     try {
       await this.schedule();
@@ -171,7 +172,7 @@ export class Orchestrator {
     delete prev.endedAt;
     prev.resumes = (prev.resumes ?? 0) + 1;
     this.state = prev;
-    this.store.event('run_resume', { done, retry, costUsd: prev.costUsd });
+    this.resumeEvent = { done, retry, costUsd: prev.costUsd };
   }
 
   private overBudget(): boolean {

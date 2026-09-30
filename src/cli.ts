@@ -10,6 +10,7 @@ import { MockDriver } from './drivers/mock.js';
 import { createDemoRun } from './demo.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
+import { randomBytes } from 'node:crypto';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens, formatCost } from './tokens.js';
 import { loadPlan } from './plan.js';
@@ -25,7 +26,9 @@ Usage:
   braid run <plan.json> [--concurrency N] [--budget USD] [--replan N] [--sandbox IMAGE] [--keep-worktrees] [--watch]
   braid resume [runId] [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
-  braid watch [--port 4777]      live dashboard for this repo's runs
+  braid watch [--port 4777] [--control]
+                                 live dashboard for this repo's runs; --control adds start/stop/resume
+                                 buttons, guarded by a per-session token (BRAID_CONTROL_TOKEN or generated)
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
   braid doctor                   check that git and an agent CLI are installed
   braid status [runId]
@@ -113,6 +116,7 @@ async function main(argv: string[]): Promise<number> {
       concurrency: { type: 'string' },
       replan: { type: 'string' },
       sandbox: { type: 'string' },
+      control: { type: 'boolean' },
       budget: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
@@ -148,8 +152,11 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
   const repo = await Git.toplevel(process.cwd());
 
   if (cmd === 'watch') {
-    const watch = await startWatch(repo, port);
-    console.log(`braid watch: ${watch.url}  (Ctrl-C to exit)`);
+    // The token stays out of argv (visible in `ps`): it comes from the environment or is generated here.
+    const token = values.control ? process.env.BRAID_CONTROL_TOKEN || randomBytes(24).toString('hex') : undefined;
+    const watch = await startWatch(repo, port, token ? { token, drivers: registry } : undefined);
+    console.log(`braid watch: ${watch.url}${token && !process.env.BRAID_CONTROL_TOKEN ? `#token=${token}` : ''}  (Ctrl-C to exit)`);
+    if (token) console.log('controls enabled: open the URL above (the token is in the part after #)');
     await new Promise(() => undefined);
   }
 

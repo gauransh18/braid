@@ -106,6 +106,30 @@ button { font: inherit; color: inherit; }
 .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .meter.hot i { background: var(--warn); }
+.btn {
+  border: 1px solid var(--line-2); background: var(--panel); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text);
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { color: var(--err); }
+.btn[disabled] { opacity: .5; cursor: default; }
+[hidden] { display: none !important; }
+dialog.sheet {
+  border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(680px, 94vw); box-shadow: var(--shadow);
+}
+dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
+.sheet form { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; }
+.sheet h3 { margin: 0; font-size: 17px; }
+.sheet label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.sheet input, .sheet textarea, .sheet select {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px;
+}
+.sheet textarea { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; min-height: 240px; resize: vertical; }
+.sheet .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.sheet .row > label { flex: 1 1 160px; }
+.sheet .actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+.sheet .note { font-size: 12px; color: var(--muted); }
+.sheet .error { font-size: 12px; color: var(--err); min-height: 1em; white-space: pre-wrap; }
 .icon-btn {
   width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel);
   cursor: pointer; display: grid; place-items: center;
@@ -246,6 +270,9 @@ svg.threads path.dim { opacity: .18; }
   <div class="run-meta">
     <select class="select" id="runPick" aria-label="Run"></select>
     <span class="pill" id="runStatus">-</span>
+    <button class="btn primary" id="newRunBtn" hidden>New run</button>
+    <button class="btn danger" id="stopBtn" hidden>Stop</button>
+    <button class="btn" id="resumeBtn" hidden>Resume</button>
     <div class="stat"><span class="k">Merged</span><span class="v" id="progressV">-</span><div class="meter"><i id="progressM"></i></div></div>
     <div class="stat"><span class="k">Spend</span><span class="v" id="spendV">-</span><span class="sub mono" id="tokV" title=""></span><div class="meter" id="spendMeter"><i id="spendM"></i></div></div>
     <div class="stat"><span class="k">Elapsed</span><span class="v" id="elapsedV">-</span></div>
@@ -254,6 +281,34 @@ svg.threads path.dim { opacity: .18; }
 </header>
 
 <main id="main"></main>
+
+<dialog class="sheet" id="newRunDlg" aria-labelledby="nrTitle">
+  <form method="dialog" id="newRunForm">
+    <h3 class="pixel" id="nrTitle">New run</h3>
+    <div class="row">
+      <label>Goal (to draft a plan)<input id="nrGoal" placeholder="add rate limiting to the API" autocomplete="off"></label>
+      <label>Verify command<input id="nrVerify" placeholder="npm test" autocomplete="off"></label>
+      <button type="button" class="btn" id="nrDraft">Draft plan</button>
+    </div>
+    <div class="row">
+      <label>Or load a saved plan (plans/ in the repo)<select id="nrPlans"><option value="">-</option></select></label>
+      <label>Spend cap (USD)<input id="nrBudget" type="number" min="0.01" step="0.5" value="5"></label>
+    </div>
+    <label>Plan (JSON, edit before starting)<textarea id="nrPlan" spellcheck="false" placeholder='{"goal": "...", "tasks": [{"id": "a", "title": "...", "prompt": "..."}]}'></textarea></label>
+    <div class="note">Drafting uses the agent and costs a little. Starting a run lets agents edit files in isolated worktrees; nothing touches your branches.</div>
+    <div class="error" id="nrError" role="alert"></div>
+    <div class="actions"><button type="button" class="btn" id="nrCancel">Cancel</button><button type="button" class="btn primary" id="nrStart">Start run</button></div>
+  </form>
+</dialog>
+<dialog class="sheet" id="resumeDlg" aria-labelledby="rsTitle">
+  <form method="dialog">
+    <h3 class="pixel" id="rsTitle">Resume run</h3>
+    <div class="note">Merged tasks are kept. Everything else is retried. Spend so far counts toward the cap.</div>
+    <label>Spend cap (USD)<input id="rsBudget" type="number" min="0.01" step="0.5" value="5"></label>
+    <div class="error" id="rsError" role="alert"></div>
+    <div class="actions"><button type="button" class="btn" id="rsCancel">Cancel</button><button type="button" class="btn primary" id="rsGo">Resume</button></div>
+  </form>
+</dialog>
 
 <div class="scrim" id="scrim"></div>
 <aside class="inspector" id="inspector" aria-label="Task details" aria-hidden="true">
@@ -441,6 +496,7 @@ function fmtRunLabel(r) {
 }
 
 async function openRun(id) {
+  const gen = S.openGen = (S.openGen || 0) + 1; // two overlapping opens must not both attach an event stream
   if (S.es) S.es.close();
   closeInspector();
   Object.assign(S, { runId: id, plan: null, state: null, events: [], color: {} });
@@ -450,6 +506,7 @@ async function openRun(id) {
     const d = await getJSON(`/api/run/${id}`);
     S.plan = d.plan; S.state = d.state;
   } catch {}
+  if (gen !== S.openGen) return;
   assignColors();
   renderAll();
   const es = new EventSource(`/api/run/${id}/events`);
@@ -494,6 +551,7 @@ function depthMap(tasks) {
 }
 
 function renderAll() {
+  if (typeof renderControls === 'function') renderControls();
   if (!S.plan || !S.state) {
     if (!S.runs.length) return renderEmpty();
     $('main').innerHTML = `<div class="empty"><div class="pixel" style="font-size:18px">Setting up the loom...</div></div>`;
@@ -719,6 +777,10 @@ const EV_TEXT = {
   sync: (e) => [e.conflicts?.length ? `pulled latest braid, conflicts in ${e.conflicts.join(', ')}` : 'pulled latest braid, no conflicts', e.conflicts?.length ? 'err' : ''],
   resolve: (e) => [e.leftover?.length ? `markers still in ${e.leftover.join(', ')}` : `resolved ${e.files.join(', ')}`, e.leftover?.length ? 'err' : 'ok'],
   merge_reverted: () => ['merge rolled back: combined build failed', 'err'],
+  run_resume: (e) => [`Run resumed: ${(e.done || []).length} merged, retrying ${(e.retry || []).join(', ') || 'none'}`, ''],
+  run_error: (e) => [`Run error: ${String(e.message || '').split('\n')[0].slice(0, 140)}`, 'err'],
+  replan: (e) => [e.ok ? `replanned into ${(e.added || []).join(', ')}` : `replan failed: ${String(e.reason || '').split('\n')[0].slice(0, 100)}`, e.ok ? 'ok' : 'err'],
+  sandbox: (e) => [`sandbox: ${e.runtime} ${e.image}${e.agent ? ' (agent inside)' : ''}`, ''],
 };
 function renderFeed() {
   const list = $('feed');
@@ -842,6 +904,117 @@ addEventListener('hashchange', () => {
   const id = new URLSearchParams(location.hash.slice(1)).get('run');
   if (id && id !== S.runId) openRun(id);
 });
+
+/* ================= controls (only when the server was started with a token) ================= */
+const CTL = { on: false, token: null, active: null };
+try {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get('token')) {
+    CTL.token = p.get('token');
+    try { sessionStorage.setItem('braidToken', CTL.token); } catch {}
+    p.delete('token'); // keep the secret out of history and out of screenshots of the address bar
+    history.replaceState(null, '', p.toString() ? '#' + p : location.pathname + location.search);
+  } else { try { CTL.token = sessionStorage.getItem('braidToken'); } catch {} }
+} catch {}
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { authorization: 'Bearer ' + CTL.token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+
+function renderControls() {
+  const st = S.state?.status;
+  const idle = !CTL.active;
+  $('newRunBtn').hidden = !CTL.on;
+  $('newRunBtn').disabled = !idle;
+  $('stopBtn').hidden = !(CTL.on && CTL.active && CTL.active === S.runId);
+  $('resumeBtn').hidden = !(CTL.on && idle && S.runId && (st === 'failed' || st === 'aborted'));
+}
+
+async function pollControl() {
+  if (!CTL.on) return;
+  try { CTL.active = (await api('GET', '/api/status')).active; } catch { CTL.active = null; }
+  renderControls();
+}
+
+async function openNewRun() {
+  $('nrError').textContent = '';
+  $('newRunDlg').showModal();
+  try {
+    const names = await api('GET', '/api/plans');
+    $('nrPlans').innerHTML = '<option value="">-</option>' + names.map(n => `<option>${esc(n)}</option>`).join('');
+  } catch {}
+}
+$('newRunBtn').addEventListener('click', openNewRun);
+$('nrCancel').addEventListener('click', () => $('newRunDlg').close());
+$('nrPlans').addEventListener('change', async (e) => {
+  if (!e.target.value) return;
+  try {
+    const plan = await api('GET', '/api/plans/' + encodeURIComponent(e.target.value));
+    $('nrPlan').value = JSON.stringify(plan, null, 2);
+    if (plan.budgetUsd) $('nrBudget').value = plan.budgetUsd;
+  } catch (err) { $('nrError').textContent = err.message; }
+});
+$('nrDraft').addEventListener('click', async () => {
+  const btn = $('nrDraft');
+  $('nrError').textContent = '';
+  btn.disabled = true; btn.textContent = 'Drafting...';
+  try {
+    const verify = $('nrVerify').value.trim();
+    const { plan, costUsd } = await api('POST', '/api/plan-draft', { goal: $('nrGoal').value, verify: verify ? [verify] : [] });
+    $('nrPlan').value = JSON.stringify(plan, null, 2);
+    $('nrError').textContent = `Drafted (planner spend ${fmtUsd(costUsd)}). Edit it, then start.`;
+  } catch (err) { $('nrError').textContent = err.message; }
+  finally { btn.disabled = false; btn.textContent = 'Draft plan'; }
+});
+$('nrStart').addEventListener('click', async () => {
+  $('nrError').textContent = '';
+  let plan;
+  try { plan = JSON.parse($('nrPlan').value); } catch { $('nrError').textContent = 'The plan is not valid JSON.'; return; }
+  plan.budgetUsd = Number($('nrBudget').value);
+  $('nrStart').disabled = true;
+  try {
+    const { runId } = await api('POST', '/api/runs', { plan });
+    $('newRunDlg').close();
+    await loadRuns();
+    openRun(runId);
+    pollControl();
+  } catch (err) { $('nrError').textContent = err.message; }
+  finally { $('nrStart').disabled = false; }
+});
+$('stopBtn').addEventListener('click', async () => {
+  $('stopBtn').disabled = true;
+  try { await api('POST', `/api/run/${S.runId}/stop`, {}); } catch {}
+  $('stopBtn').disabled = false;
+  pollControl();
+});
+$('resumeBtn').addEventListener('click', () => {
+  $('rsError').textContent = '';
+  $('rsBudget').value = Math.max(5, Math.ceil((S.state?.costUsd || 0) + 3));
+  $('resumeDlg').showModal();
+});
+$('rsCancel').addEventListener('click', () => $('resumeDlg').close());
+$('rsGo').addEventListener('click', async () => {
+  $('rsGo').disabled = true;
+  try {
+    await api('POST', `/api/run/${S.runId}/resume`, { budgetUsd: Number($('rsBudget').value) });
+    $('resumeDlg').close();
+    pollControl();
+  } catch (err) { $('rsError').textContent = err.message; }
+  finally { $('rsGo').disabled = false; }
+});
+
+(async () => {
+  try { CTL.on = !!CTL.token && (await getJSON('/api/config')).control; } catch {}
+  await pollControl();
+  if (CTL.on) setInterval(pollControl, 2000);
+})();
 
 loadRuns();
 setInterval(loadRuns, 5000);

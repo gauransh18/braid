@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    collections::HashMap,
     fs,
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -12,11 +13,24 @@ use std::{
 };
 
 use tauri::{
-    menu::{Menu, MenuItemBuilder, SubmenuBuilder},
-    AppHandle, Manager, RunEvent, Url,
+    menu::{Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, RunEvent, Url, Wry,
 };
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+mod monitor;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
+
+/// Repository whose runs are being watched for notifications.
+struct Watched(Mutex<Option<PathBuf>>);
+
+/// Tray pieces the monitor updates as runs come and go.
+struct TrayState {
+    status: MenuItem<Wry>,
+    tray: TrayIcon<Wry>,
+}
 
 /// The running `braid watch` process, so it can be replaced when you open another repository and killed on exit.
 struct Server(Mutex<Option<CommandChild>>);
@@ -113,6 +127,7 @@ fn open_repo(app: &AppHandle, repo: &Path) -> Result<(), String> {
     }
 
     *app.state::<Server>().0.lock().unwrap() = Some(child);
+    *app.state::<Watched>().0.lock().unwrap() = Some(repo.to_path_buf());
     save_repo(app, repo);
     // The token rides in the URL fragment, which is never sent to the server or written to logs.
     let url = Url::parse(&format!("http://127.0.0.1:{port}/#token={token}")).map_err(|e| e.to_string())?;
@@ -121,6 +136,57 @@ fn open_repo(app: &AppHandle, repo: &Path) -> Result<(), String> {
     let name = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let _ = window.set_title(&format!("braid - {name}"));
     Ok(())
+}
+
+fn show_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Polls the watched repo's run files. Updates the tray and raises notifications, except while the window
+/// is focused (the dashboard already shows it).
+fn start_monitor(app: AppHandle) {
+    thread::spawn(move || {
+        let _ = app.notification().request_permission();
+        let mut repo: Option<PathBuf> = None;
+        let mut seen: Option<HashMap<String, monitor::RunSnap>> = None;
+        loop {
+            thread::sleep(Duration::from_secs(2));
+            let current = app.state::<Watched>().0.lock().unwrap().clone();
+            if current != repo {
+                repo = current;
+                seen = None; // new repo: take a fresh baseline, do not announce old runs
+            }
+            let Some(path) = &repo else { continue };
+            let runs = monitor::read_runs(path, 20);
+
+            if let Some(prev) = &seen {
+                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let focused = app.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
+                if !focused {
+                    for note in monitor::diff(&name, prev, &runs) {
+                        let _ = app.notification().builder().title(note.title).body(note.body).show();
+                    }
+                }
+            }
+
+            let active = monitor::active_count(&runs);
+            let tray = app.state::<TrayState>();
+            let label = match active {
+                0 => "Idle".to_string(),
+                1 => "1 run active".to_string(),
+                n => format!("{n} runs active"),
+            };
+            let _ = tray.status.set_text(&label);
+            let _ = tray.tray.set_tooltip(Some(format!("braid - {label}")));
+            // Text next to the icon in the macOS menu bar; other platforms ignore it.
+            let _ = tray.tray.set_title(if active > 0 { Some(active.to_string()) } else { None::<String> });
+            seen = Some(runs);
+        }
+    });
 }
 
 /// Ask for a repository until one starts or the user cancels. Runs off the main thread: the picker blocks.
@@ -155,7 +221,9 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Server(Mutex::new(None)))
+        .manage(Watched(Mutex::new(None)))
         .setup(|app| {
             let open = MenuItemBuilder::with_id("open-repo", "Open Repository...")
                 .accelerator("CmdOrCtrl+O")
@@ -164,6 +232,37 @@ fn main() {
             let menu = Menu::default(app.handle())?;
             menu.append(&repo_menu)?;
             app.set_menu(menu)?;
+
+            let status = MenuItem::with_id(app, "status", "Idle", false, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show Braid", true, None::<&str>)?;
+            let pick = MenuItem::with_id(app, "tray-open-repo", "Open Repository...", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Braid", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(
+                app,
+                &[&status, &PredefinedMenuItem::separator(app)?, &show, &pick, &PredefinedMenuItem::separator(app)?, &quit],
+            )?;
+            let tray = TrayIconBuilder::with_id("main")
+                .icon(app.default_window_icon().expect("app icon").clone())
+                .tooltip("braid - Idle")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => show_window(app),
+                    "tray-open-repo" => {
+                        show_window(app);
+                        choose_repo(app.clone(), false);
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        show_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+            app.manage(TrayState { status, tray });
+            start_monitor(app.handle().clone());
 
             let handle = app.handle().clone();
             match saved_repo(&handle) {
@@ -178,6 +277,13 @@ fn main() {
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Closing the window keeps braid in the tray so notifications keep coming; Quit really quits.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .on_menu_event(|app, event| {
             if event.id() == "open-repo" {
                 choose_repo(app.clone(), false);
@@ -187,6 +293,10 @@ fn main() {
         .expect("failed to build braid desktop");
 
     app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = event {
+            show_window(app);
+        }
         if let RunEvent::Exit = event {
             if let Some(child) = app.state::<Server>().0.lock().unwrap().take() {
                 let _ = child.kill();

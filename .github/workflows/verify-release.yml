@@ -1,0 +1,30 @@
+# Runs the end-to-end smoke test against a PUBLISHED release's executable on a real machine of each kind.
+# Use it after a release (Actions > verify-release > Run workflow, with the tag), or to see how an older release behaves.
+name: verify-release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify, for example v0.2.1
+        required: true
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, file: braid-windows-x64.exe }
+          - { os: ubuntu-latest, file: braid-linux-x64 }
+          - { os: macos-14, file: braid-darwin-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Download the release executable
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern "${{ matrix.file }}" --dir bin
+          chmod +x "bin/${{ matrix.file }}" || true
+      - run: node scripts/smoke.mjs bin/${{ matrix.file }}

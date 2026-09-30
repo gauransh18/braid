@@ -128,8 +128,16 @@ for (let i = 0; i < 60 && !page; i++) {
 }
 check(/<title>/.test(page) && page.length > 20_000, 'the dashboard page is served from inside the executable', `${page.length} bytes`);
 check(/runId/.test(runs), 'the demo run shows up in the API', runs.slice(0, 200));
-demo.kill();
-
-rmSync(tmp, { recursive: true, force: true });
+// Windows will not delete a folder a process still has open, so wait for the demo to exit, then clean up best-effort.
+await new Promise((done) => {
+  demo.once('exit', done);
+  demo.kill();
+  setTimeout(done, 5000);
+});
+try {
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+} catch {
+  /* a leftover temp folder is not a test failure */
+}
 console.log(failures ? `\n${failures} check(s) failed on ${os}` : `\nall checks passed on ${os}`);
 process.exit(failures ? 1 : 0);

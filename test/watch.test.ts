@@ -85,3 +85,22 @@ describe('watch server', () => {
     assert.equal((await get(`${w.url}api/run/${RUN}/task/..%2Fplan/log`)).status, 404);
   });
 });
+
+describe('embedded ui (single-file build)', () => {
+  it('serves the embedded page instead of reading ui/index.html', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'braid-watch-'));
+    const g = globalThis as { __BRAID_UI?: string };
+    g.__BRAID_UI = '<!doctype html><title>embedded</title>';
+    const w = await startWatch(repo, 0);
+    try {
+      const res = await get(w.url);
+      assert.equal(res.status, 200);
+      assert.equal(res.body, '<!doctype html><title>embedded</title>');
+    } finally {
+      delete g.__BRAID_UI;
+      await w.close();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+

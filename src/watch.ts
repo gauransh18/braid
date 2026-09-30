@@ -69,7 +69,10 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse): 
 
   if (parts.length === 0) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    createReadStream(UI_PATH).pipe(res);
+    // A single-file build embeds the page in the binary; otherwise read it from the package.
+    const embedded = (globalThis as { __BRAID_UI?: string }).__BRAID_UI;
+    if (embedded !== undefined) res.end(embedded);
+    else createReadStream(UI_PATH).pipe(res);
     return;
   }
   if (parts[0] !== 'api') return send(res, 404, { error: 'not found' });

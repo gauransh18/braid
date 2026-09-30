@@ -4,6 +4,7 @@ import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
 import { addTokens, describeTokens, formatCost, formatTokens } from '../src/tokens.js';
 import { ClaudeDriver, claudeTokens, parseClaudeLine } from '../src/drivers/claude.js';
 import { estimateCostUsd, priceFor } from '../src/pricing.js';
+import { checkTools, doctorExitCode, formatDoctor } from '../src/doctor.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
 
@@ -153,5 +154,29 @@ describe('tokens', () => {
     const r = p.finish(0, '');
     assert.deepEqual(r.tokens, { input: 200, cached: 100, output: 50 });
     assert.equal(r.costEstimated, true);
+  });
+});
+
+describe('doctor', () => {
+  const tool = (name: string, bin: string, required = false) => ({ name, bin, args: ['--version'], required, why: 'w', install: `install ${name}` });
+
+  it('reports found and missing tools with install hints', async () => {
+    const rows = await checkTools([tool('git', 'git', true), tool('claude', '/nonexistent/claude')]);
+    assert.equal(rows[0]!.ok, true);
+    assert.match(rows[0]!.version ?? '', /git version/);
+    assert.equal(rows[1]!.ok, false);
+    const text = formatDoctor(rows);
+    assert.match(text, /not found claude .*install claude/);
+    assert.match(text, /No agent CLI found/);
+    assert.equal(doctorExitCode(rows), 1, 'no agent found is a failure');
+  });
+
+  it('is ready with git and one agent, and fails without git', async () => {
+    const ok = await checkTools([tool('git', 'git', true), tool('claude', 'git')]);
+    assert.equal(doctorExitCode(ok), 0);
+    assert.match(formatDoctor(ok), /Ready/);
+    const noGit = await checkTools([tool('git', '/nonexistent/git', true), tool('claude', 'git')]);
+    assert.equal(doctorExitCode(noGit), 1);
+    assert.match(formatDoctor(noGit), /MISSING\s+git/);
   });
 });

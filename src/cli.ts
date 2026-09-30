@@ -8,6 +8,7 @@ import { DriverRegistry } from './drivers/driver.js';
 import { GeminiDriver } from './drivers/gemini.js';
 import { MockDriver } from './drivers/mock.js';
 import { createDemoRun } from './demo.js';
+import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens, formatCost } from './tokens.js';
@@ -26,6 +27,7 @@ Usage:
                                  continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777]      live dashboard for this repo's runs
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
+  braid doctor                   check that git and an agent CLI are installed
   braid status [runId]
   braid runs
 
@@ -135,6 +137,12 @@ async function main(argv: string[]): Promise<number> {
     console.log(`
 demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     await new Promise(() => undefined);
+  }
+
+  if (cmd === 'doctor') {
+    const rows = await checkTools();
+    console.log(formatDoctor(rows));
+    return doctorExitCode(rows);
   }
 
   const repo = await Git.toplevel(process.cwd());

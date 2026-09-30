@@ -1,0 +1,34 @@
+# Builds a single-file braid executable per platform and attaches them to a GitHub release.
+# Trigger: push a tag like v0.2.0. Not yet exercised on GitHub.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14, file: braid-darwin-arm64 }
+          - { os: macos-13, file: braid-darwin-x64 }
+          - { os: windows-latest, file: braid-windows-x64.exe }
+          - { os: ubuntu-latest, file: braid-linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: oven-sh/setup-bun@v2
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:binary
+      - name: Checksum
+        shell: bash
+        run: cd dist/bin && (sha256sum ${{ matrix.file }} 2>/dev/null || shasum -a 256 ${{ matrix.file }}) > ${{ matrix.file }}.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bin/${{ matrix.file }}
+            dist/bin/${{ matrix.file }}.sha256

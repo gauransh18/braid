@@ -3,14 +3,24 @@
   "version": "0.1.0",
   "description": "Headless multi-agent harness: plan a task graph, run coding agents in isolated git worktrees, verify, review and merge.",
   "type": "module",
-  "bin": { "braid": "dist/src/cli.js" },
-  "files": ["dist/src", "ui", "LICENSE", "README.md"],
+  "bin": {
+    "braid": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "ui",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:binary": "node scripts/build-binary.mjs"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.7.5",

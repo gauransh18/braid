@@ -16,6 +16,14 @@ npm link   # puts `braid` on PATH
 ```
 
 You need Node 22 or later, git, and at least one agent CLI signed in (`claude`, optionally `codex` or `gemini`).
+Run `braid doctor` to see what is missing and how to install it.
+
+### Single-file executable
+
+No Node needed. `npm run build:binary` compiles braid, dashboard included, into one file with
+[Bun](https://bun.sh): `dist/bin/braid-<platform>` (about 58 MB on macOS arm64). Add `-- --all` to also build macOS x64,
+Windows x64 and Linux x64 (Bun downloads each runtime). Pushing a `v*` tag builds all of them on GitHub and attaches
+them to a release (`.github/workflows/release.yml`, not yet run). git and the agent CLIs stay separate installs.
 
 ## Use
 

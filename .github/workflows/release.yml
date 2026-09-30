@@ -1,7 +1,6 @@
-# Builds single-file braid executables and attaches them to a GitHub release.
-# Trigger: push a tag like v0.2.0. One Linux job builds every platform: bun cross-compiles
-# (macOS arm64 and x64, Windows x64, Linux x64), so there are no per-OS runners to keep alive.
-# The desktop app (.dmg) is not built here; it is built and attached by hand for now.
+# Builds the command-line executables and publishes them, but only after the exact files that would be published
+# pass an end-to-end smoke test on real machines: Windows (x64 and ARM), Linux and macOS.
+# Trigger: push a tag like v0.2.1. The Mac app (.dmg) is built locally and attached by hand.
 name: release
 on:
   push:
@@ -9,7 +8,7 @@ on:
 permissions:
   contents: write
 jobs:
-  binaries:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +18,41 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:binary -- --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: executables
+          path: dist/bin/braid-*
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, file: braid-windows-x64.exe }
+          # Windows on ARM (for example Parallels on an Apple-silicon Mac) runs the x64 build through emulation.
+          - { os: windows-11-arm, file: braid-windows-x64.exe }
+          - { os: ubuntu-latest, file: braid-linux-x64 }
+          - { os: macos-14, file: braid-darwin-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with: { name: executables, path: bin }
+      - name: Make executable
+        if: runner.os != 'Windows'
+        run: chmod +x bin/*
+      - run: node scripts/smoke.mjs bin/${{ matrix.file }}
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: executables, path: dist/bin }
       - name: Checksums
         run: cd dist/bin && sha256sum braid-* > SHA256SUMS
       - uses: softprops/action-gh-release@v2

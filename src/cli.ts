@@ -12,11 +12,13 @@ import { createDemoRun } from './demo.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
 import { fetchModels, isProvider, testProvider } from './models.js';
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens } from './tokens.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
+import { parentIsExplorer } from './winhelp.js';
 import { RunStore, stateRoot, type HarnessEvent } from './store.js';
 import type { PlanSpec, RunState } from './types.js';
 import { startWatch } from './watch.js';
@@ -112,6 +114,31 @@ function printState(s: RunState): void {
   }
 }
 
+/**
+ * A command-line program that is double-clicked on Windows opens a console, prints a line and closes before anyone can
+ * read it, which looks like "it does nothing". When that is how braid was started, say what it is and wait.
+ */
+async function explainIfDoubleClicked(): Promise<void> {
+  if (process.platform !== 'win32' || !process.stdin.isTTY) return;
+  const parent = spawnSync('tasklist', ['/FI', `PID eq ${process.ppid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true });
+  if (!parentIsExplorer(parent.stdout ?? '')) return;
+  console.log(`
+braid is a command-line program, so double-clicking it does not open a window.
+
+Open PowerShell or Windows Terminal, go to your project folder, and run it there:
+
+    cd C:\\path\\to\\your\\project
+    path\\to\\braid-windows-x64.exe doctor        (checks that git and an agent are installed)
+
+Put the file in a folder on your PATH (and rename it braid.exe) to run it as just "braid".
+`);
+  process.stdout.write('Press Enter to close this window. ');
+  await new Promise<void>((resolve) => {
+    process.stdin.resume();
+    process.stdin.once('data', () => resolve());
+  });
+}
+
 /** Newest run that did not finish cleanly. */
 async function latestUnfinished(repo: string): Promise<string> {
   const runs = await RunStore.listRuns(repo);
@@ -146,6 +173,7 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, arg] = positionals;
   if (values.help || !cmd) {
     console.log(USAGE);
+    if (!cmd && !values.help) await explainIfDoubleClicked();
     // Asking for help is not an error; running with nothing to do is.
     return values.help ? 0 : 1;
   }

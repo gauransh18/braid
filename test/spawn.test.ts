@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { findExecutable, quoteForCmd, spawnable } from '../src/spawn.js';
+import { parentIsExplorer } from '../src/winhelp.js';
 
 /** A pretend Windows machine: only the listed files exist. */
 const windows = (files: string[], extra: Record<string, string> = {}) => ({
@@ -62,5 +63,16 @@ describe('spawnable', () => {
     const w = windows(['C:\\Program Files\\Git\\cmd\\git.exe']);
     assert.deepEqual(spawnable('git', ['--version'], w), { cmd: 'C:\\Program Files\\Git\\cmd\\git.exe', args: ['--version'] });
     assert.deepEqual(spawnable('missing', ['a'], w), { cmd: 'missing', args: ['a'] });
+  });
+});
+
+describe('double-click detection on Windows', () => {
+  it('recognises Explorer as the parent and nothing else', () => {
+    assert.equal(parentIsExplorer('"explorer.exe","4321","Console","1","81,244 K"\r\n'), true);
+    assert.equal(parentIsExplorer('"Explorer.EXE","4321","Console","1","81,244 K"'), true);
+    assert.equal(parentIsExplorer('"pwsh.exe","100","Console","1","90,000 K"'), false);
+    assert.equal(parentIsExplorer('"cmd.exe","100","Console","1","5,000 K"'), false);
+    assert.equal(parentIsExplorer('INFO: No tasks are running which match the specified criteria.'), false);
+    assert.equal(parentIsExplorer(''), false);
   });
 });

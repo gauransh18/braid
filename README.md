@@ -18,6 +18,17 @@ npm link   # puts `braid` on PATH
 You need Node 22 or later, git, and at least one agent CLI signed in (`claude`, optionally `codex` or `gemini`).
 Run `braid doctor` to see what is missing and how to install it.
 
+### Windows
+
+Download `braid-windows-x64.exe` from the [releases](https://github.com/gauransh18/braid/releases). It is a **command-line
+program**: double-clicking it only explains that. Open PowerShell or Windows Terminal in your project folder and run it
+there, for example `.\braid-windows-x64.exe doctor`. To run it as plain `braid`, rename it to `braid.exe` and put it in a
+folder on your PATH. You also need [git for Windows](https://git-scm.com/download/win) and at least one agent (Claude
+Code, Codex or Gemini CLI, installed with npm or their installers) or an NVIDIA API key. The download is not code-signed yet,
+so SmartScreen may say "Windows protected your PC": choose **More info**, then **Run anyway**. The build runs on CPUs without
+AVX2, and on Windows on ARM through emulation. Every release is tested on real Windows machines (x64 and ARM) before it
+is published; the desktop app is macOS-only for now.
+
 ### Single-file executable
 
 No Node needed. `npm run build:binary` compiles braid, dashboard included, into one file with

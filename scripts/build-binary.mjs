@@ -23,10 +23,13 @@ writeFileSync(join(out, 'entry.mjs'), "import './ui-embedded.mjs';\nimport '../d
 const os = platform() === 'win32' ? 'windows' : platform();
 const here = `bun-${os}-${arch() === 'arm64' ? 'arm64' : 'x64'}`;
 const targets = process.argv.includes('--all') ? ['bun-darwin-arm64', 'bun-darwin-x64', 'bun-windows-x64', 'bun-linux-x64'] : [here];
+// Bun's normal x64 build needs AVX2, which older CPUs and some emulators lack, so it crashes at start there. The
+// baseline build runs everywhere, at a small speed cost, so Windows x64 ships that one (the file name stays the same).
+const bunTarget = (t) => (t === 'bun-windows-x64' ? 'bun-windows-x64-baseline' : t);
 
 mkdirSync(join(root, 'dist', 'bin'), { recursive: true });
 for (const target of targets) {
   const name = `braid-${target.replace('bun-', '')}${target.includes('windows') ? '.exe' : ''}`;
   console.log(`\n== ${name}`);
-  run('bun', ['build', '--compile', `--target=${target}`, join('build', 'entry.mjs'), '--outfile', join('dist', 'bin', name)]);
+  run('bun', ['build', '--compile', `--target=${bunTarget(target)}`, join('build', 'entry.mjs'), '--outfile', join('dist', 'bin', name)]);
 }

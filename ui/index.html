@@ -140,7 +140,9 @@ body.start-mode .run-meta > :not(#themeBtn), body.start-mode #bubble { display: 
 .composer .how li::before { content: counter(s); display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 11px; margin-right: 6px; }
 .composer .how b { color: var(--text); font-weight: 600; }
 .composer .agents { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
-.composer .agents .chip-a { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); }
+.composer .agents .chip-a { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: inherit; font: inherit; cursor: pointer; }
+.composer .agents .chip-a:hover { border-color: var(--accent); }
+.composer .agents .chip-a:disabled { opacity: .6; cursor: default; }
 .composer .agents .chip-a.ok { color: var(--ok); border-color: transparent; background: var(--ok-soft); }
 .composer .agents .warn { color: var(--warn); flex-basis: 100%; }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -1054,14 +1056,31 @@ function mountComposer(host, onStarted) {
   // Environment: suggested check command, saved plans, and whether an agent CLI exists.
   api('GET', '/api/status').then((st) => { defaults = st.defaults || {}; if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
   api('GET', '/api/plans').then((names) => { f('saved').innerHTML = '<option value="">Load a saved plan...</option>' + names.map((n) => `<option>${esc2(n)}</option>`).join(''); if (!names.length) { f('saved').hidden = true; f('saved').nextElementSibling.hidden = true; } }).catch(() => {});
-  api('GET', '/api/doctor').then((tools) => {
-    const agents = tools.filter((t) => ['claude', 'codex', 'gemini', 'nim'].includes(t.name));
-    const usable = agents.some((t) => t.ok && !t.disabled);
-    const mark = (t) => (t.disabled ? '&#8856;' : t.ok ? '&#10003;' : '&#10007;');
-    const why = (t) => (t.disabled ? 'switched off in Settings' : t.ok ? t.version : 'not available. ' + t.install);
-    f('agents').innerHTML = '<span>Agents:</span>' + agents.map((t) => `<span class="chip-a ${t.ok && !t.disabled ? 'ok' : ''}" title="${esc2(why(t))}">${mark(t)} ${esc2(t.name === 'nim' ? 'NVIDIA NIM' : t.name)}${t.disabled ? ' (off)' : ''}</span>`).join('') +
-      (usable ? '' : `<span class="warn">No agent is ready. Install one (for example: ${esc2(agents.find((t) => t.name === 'claude')?.install || 'Claude Code')}) and sign in once in a terminal, or add an NVIDIA API key, in Braid > Settings (Cmd+,).</span>`);
-  }).catch(() => {});
+  /** The agent chips are switches: click one to turn that agent off or on everywhere (saved in Settings). */
+  function loadAgents() {
+    return api('GET', '/api/doctor').then((tools) => {
+      const agents = tools.filter((t) => ['claude', 'codex', 'gemini', 'nim'].includes(t.name));
+      const usable = agents.some((t) => t.ok && !t.disabled);
+      const mark = (t) => (t.disabled ? '&#8856;' : t.ok ? '&#10003;' : '&#10007;');
+      const why = (t) => (t.disabled ? 'switched off' : t.ok ? t.version : 'not available. ' + t.install);
+      f('agents').innerHTML = '<span>Agents:</span>' + agents.map((t) =>
+        `<button type="button" class="chip-a ${t.ok && !t.disabled ? 'ok' : ''}" data-agent="${esc2(t.name)}" data-off="${t.disabled ? 1 : 0}" title="${esc2(why(t))}. Click to switch ${t.disabled ? 'on' : 'off'}.">${mark(t)} ${esc2(t.name === 'nim' ? 'NVIDIA NIM' : t.name)}${t.disabled ? ' (off)' : ''}</button>`).join('') +
+        (usable ? '' : `<span class="warn">No agent is ready. Install one (for example: ${esc2(agents.find((t) => t.name === 'claude')?.install || 'Claude Code')}) and sign in once in a terminal, or add an NVIDIA API key, in Braid > Settings (Cmd+,). Click a switched-off agent above to turn it back on.</span>`);
+    }).catch(() => {});
+  }
+  f('agents').addEventListener('click', async (e) => {
+    const chip = e.target.closest('[data-agent]');
+    if (!chip) return;
+    chip.disabled = true;
+    try {
+      await api('POST', '/api/agents/' + chip.dataset.agent, { enabled: chip.dataset.off === '1' });
+      const st = await api('GET', '/api/status');
+      defaults = st.defaults || {};
+      if (plan) renderSummary(); // the review step names the agent that will run
+    } catch (err) { say('goal', err.message); }
+    loadAgents();
+  });
+  loadAgents();
 
   act('draft').addEventListener('click', async () => {
     const goal = f('goal').value.trim();

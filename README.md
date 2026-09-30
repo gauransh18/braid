@@ -76,8 +76,7 @@ The dashboard opens at `http://127.0.0.1:4777`. It only listens on this machine 
 
 `braid watch --control` (and the desktop app) turns an empty repository into a guided start: describe a goal, and braid
 drafts a plan you can review and edit (tasks, dependencies, the command every task must pass, pre-filled from your
-`package.json`, `Cargo.toml`, `go.mod` or pytest config), set a spend cap, and start it. It also shows which agent CLIs are
-installed. Later runs use the **New run** button (same steps), plus **Stop** and **Resume**. You can also load a saved plan
+`package.json`, `Cargo.toml`, `go.mod` or pytest config), set a spend cap, and start it. It also shows which agents are available as clickable chips: click one to switch that agent off or on (saved in Settings, and applied in every open window). Later runs use the **New run** button (same steps), plus **Stop** and **Resume**. You can also load a saved plan
 from `plans/`. One run is active at a time. These endpoints can
 start agents, so they need a per-session token (from `BRAID_CONTROL_TOKEN`, or generated and printed as `#token=...`
 after the URL; it never travels in argv or the request URL), they refuse requests from other origins, and a run started

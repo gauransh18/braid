@@ -254,6 +254,16 @@
     }
   });
 
+  // A dashboard can switch agents on or off too. When you come back to this window, show what is saved.
+  addEventListener('focus', async () => {
+    if (!invoke) return;
+    try {
+      const saved = await call('settings_get');
+      const same = JSON.stringify([saved.disabled || [], saved.default_agent || null]) === JSON.stringify([state.disabled || [], state.default_agent || null]);
+      if (!same) { state.disabled = saved.disabled || []; state.default_agent = saved.default_agent || null; render(); for (const a of AGENTS) updateModelMeta(a.id); }
+    } catch { /* keep what is shown */ }
+  });
+
   async function recheck() {
     status = {}; render();
     $('recheck').disabled = true;

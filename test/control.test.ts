@@ -281,6 +281,45 @@ describe('control endpoints', () => {
       await until(async () => (await authed(server, 'GET', '/api/status')).json.active === null);
     });
 
+    it('switches agents on and off from the dashboard, and saves the choice to the desktop app\'s settings file', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'braid-settings-'));
+      temps.push(dir);
+      const file = join(dir, 'settings.json');
+      writeFileSync(file, JSON.stringify({ default_agent: 'claude', models: { claude: 'sonnet' }, disabled: [] }));
+      process.env.BRAID_SETTINGS_FILE = file;
+      const onFile = () => JSON.parse(readFileSync(file, 'utf8'));
+      try {
+        assert.equal((await call(server, 'POST', '/api/agents/claude', { enabled: false })).status, 401);
+        assert.equal((await authed(server, 'POST', '/api/agents/claude', {})).status, 400);
+        assert.equal((await authed(server, 'POST', '/api/agents/nope', { enabled: false })).status, 404);
+        assert.equal((await authed(server, 'POST', '/api/agents/mock', { enabled: false })).status, 404, 'the test driver is not switchable');
+
+        await settings({ defaults: { driver: 'claude', models: { claude: 'sonnet' } } });
+        const off = await authed(server, 'POST', '/api/agents/claude', { enabled: false });
+        assert.equal(off.status, 200);
+        assert.deepEqual(off.json, { disabled: ['claude'], persisted: true });
+        // In this window: reported, and plans that need it are refused.
+        const status = (await authed(server, 'GET', '/api/status')).json.defaults;
+        assert.deepEqual(status.disabled, ['claude']);
+        assert.equal(status.driver, undefined, 'switching off the default clears it');
+        assert.equal((await authed(server, 'POST', '/api/runs', { plan: { goal: 'g', budgetUsd: 1, driver: 'claude', tasks: [{ id: 'a', title: 'A', prompt: 'p' }] } })).status, 400);
+        // In the file the desktop app owns: the choice is saved, the default cleared, everything else kept.
+        assert.deepEqual(onFile(), { default_agent: null, models: { claude: 'sonnet' }, disabled: ['claude'] });
+
+        const on = await authed(server, 'POST', '/api/agents/claude', { enabled: true });
+        assert.deepEqual(on.json.disabled, []);
+        assert.deepEqual(onFile().disabled, []);
+        assert.equal(onFile().models.claude, 'sonnet');
+      } finally {
+        delete process.env.BRAID_SETTINGS_FILE;
+        await settings({ defaults: {} });
+      }
+      // Without a settings file (a plain `braid watch --control`) it still works for this process, unsaved.
+      const unsaved = await authed(server, 'POST', '/api/agents/claude', { enabled: false });
+      assert.equal(unsaved.json.persisted, false);
+      await authed(server, 'POST', '/api/agents/claude', { enabled: true });
+    });
+
     it('accepts the NVIDIA key like the other provider keys', async () => {
       const before = process.env.NVIDIA_API_KEY;
       try {

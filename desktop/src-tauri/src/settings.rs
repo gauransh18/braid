@@ -40,7 +40,7 @@ pub struct Settings {
     pub disabled: Vec<String>,
 }
 
-fn file(app: &AppHandle) -> Option<PathBuf> {
+pub fn file(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
 }
 
@@ -106,6 +106,11 @@ pub fn key_clear(agent: &str) -> Result<(), String> {
     keychain::clear(env_name(agent)?)
 }
 
+/// The `defaults` block a `braid watch` process is given: default agent, models, and which agents are off.
+pub fn defaults_json(settings: &Settings) -> Value {
+    json!({ "driver": settings.default_agent, "models": settings.models, "disabled": settings.disabled })
+}
+
 /// What the rest of the app needs to know, gathered with one keychain read per agent (each read can prompt).
 #[derive(Clone)]
 pub struct Snapshot {
@@ -123,7 +128,7 @@ pub fn snapshot(settings: &Settings) -> Snapshot {
         key_set.insert(agent.to_string(), value.is_some());
         env.insert(name.to_string(), value.map_or(Value::Null, Value::String));
     }
-    Snapshot { payload: json!({ "env": env, "defaults": { "driver": settings.default_agent, "models": settings.models, "disabled": settings.disabled } }), key_set }
+    Snapshot { payload: json!({ "env": env, "defaults": defaults_json(settings) }), key_set }
 }
 
 fn models_file(app: &AppHandle) -> Option<PathBuf> {
@@ -215,6 +220,15 @@ mod tests {
         assert!(env_name("PATH").is_err());
         assert!(key_set("nope", "x").is_err());
         assert!(key_set("claude", "   ").is_err());
+    }
+
+    #[test]
+    fn defaults_json_carries_the_agents_that_are_switched_off() {
+        let s = Settings { default_agent: Some("codex".into()), models: HashMap::from([("codex".to_string(), "gpt-5.6".to_string())]), disabled: vec!["claude".into()] };
+        let d = defaults_json(&s);
+        assert_eq!(d["driver"], "codex");
+        assert_eq!(d["models"]["codex"], "gpt-5.6");
+        assert_eq!(d["disabled"][0], "claude");
     }
 
     #[test]

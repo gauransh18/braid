@@ -156,6 +156,11 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
     const verify = Array.isArray(body.verify) ? body.verify.map(String) : [];
     return send(res, 200, await runs.draft(String(body.goal ?? ''), verify, typeof body.driver === 'string' ? body.driver : undefined));
   }
+  if (parts[1] === 'agents' && parts.length === 3) {
+    const body = await readBody(req);
+    if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'body needs enabled: true or false');
+    return send(res, 200, runs.setAgentEnabled(parts[2] ?? '', body.enabled));
+  }
   if (parts[1] === 'runs' && parts.length === 2) {
     const body = await readBody(req);
     if (!body.plan || typeof body.plan !== 'object') throw new HttpError(400, 'body needs a plan object');
@@ -182,7 +187,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (parts[0] === 'api' && parts[1] === 'config' && req.method === 'GET') return send(res, 200, { control: !!control });
-  const writes = ['status', 'plans', 'plan-draft', 'doctor', 'settings'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
+  const writes = ['status', 'plans', 'plan-draft', 'doctor', 'settings', 'agents'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
   if (parts[0] === 'api' && writes) {
     if (!control) return send(res, 405, { error: 'read-only' });
     return handleControl(repo, req, res, parts, control);

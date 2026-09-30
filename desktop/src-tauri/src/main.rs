@@ -132,6 +132,13 @@ fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str
     // The token goes in the environment, not argv, so it does not show up in `ps`.
     if let Some(token) = token {
         command = command.env("BRAID_CONTROL_TOKEN", token);
+        // Lets the dashboard's agent switches save to the same file Settings uses.
+        if let Some(file) = settings::file(app) {
+            if let Some(dir) = file.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            command = command.env("BRAID_SETTINGS_FILE", file.to_string_lossy().to_string());
+        }
     }
     let (mut rx, child) = command
         .args(args.iter().cloned().chain(["--port".to_string(), port.to_string()]))
@@ -458,10 +465,19 @@ fn settings_save(app: AppHandle, default_agent: Option<String>, models: HashMap<
     settings::save(&app, &next)?;
     // Only the non-secret part changed: reuse the cached key snapshot so no keychain prompt appears.
     let mut snap = snapshot(&app);
-    snap.payload["defaults"] = serde_json::json!({ "driver": next.default_agent, "models": next.models, "disabled": next.disabled });
+    snap.payload["defaults"] = settings::defaults_json(&next);
     *app.state::<SettingsCache>().0.lock().unwrap() = Some(snap.clone());
     thread::spawn(move || push_to_sessions(&app, &snap.payload));
     Ok(())
+}
+
+/// The settings file changed behind our back (a dashboard switched an agent on or off). Read it again and tell every
+/// open dashboard's server, so all windows agree.
+fn sync_settings_from_file(app: &AppHandle) {
+    let mut snap = snapshot(app);
+    snap.payload["defaults"] = settings::defaults_json(&settings::load(app));
+    *app.state::<SettingsCache>().0.lock().unwrap() = Some(snap.clone());
+    push_to_sessions(app, &snap.payload);
 }
 
 fn push_to_sessions(app: &AppHandle, payload: &serde_json::Value) {
@@ -579,8 +595,15 @@ fn start_monitor(app: AppHandle) {
     thread::spawn(move || {
         let _ = app.notification().request_permission();
         let mut seen: HashMap<PathBuf, HashMap<String, monitor::RunSnap>> = HashMap::new();
+        let modified = |app: &AppHandle| settings::file(app).and_then(|f| fs::metadata(f).ok()).and_then(|m| m.modified().ok());
+        let mut settings_mtime = modified(&app);
         loop {
             thread::sleep(Duration::from_secs(2));
+            let now = modified(&app);
+            if now != settings_mtime {
+                settings_mtime = now;
+                sync_settings_from_file(&app);
+            }
             let repos: HashSet<PathBuf> = app.state::<Sessions>().0.lock().unwrap().values().filter_map(|s| s.repo.clone()).collect();
             seen.retain(|path, _| repos.contains(path)); // a repo nobody shows any more: baseline afresh if it returns
             let focused = app.webview_windows().values().any(|w| w.is_focused().unwrap_or(false));

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DriverRegistry } from './drivers/driver.js';
@@ -96,6 +96,44 @@ export class RunManager {
         disabled: (d.disabled ?? []).filter((n) => typeof n === 'string'),
       };
     }
+  }
+
+  /** The agents that can be switched on or off: everything registered except the test driver. */
+  knownAgents(): string[] {
+    return this.drivers().names().filter((n) => n !== 'mock');
+  }
+
+  /**
+   * Switch one agent on or off for this process and, when the desktop app gave us its settings file, in that file
+   * too, so the choice survives a restart and reaches the Settings window and the app's other windows. Switching
+   * off the default agent clears the default.
+   */
+  setAgentEnabled(agent: string, enabled: boolean): { disabled: string[]; driver?: string; persisted: boolean } {
+    if (!this.knownAgents().includes(agent)) throw new HttpError(404, `no agent called "${agent}"`);
+    const disabled = new Set(this.defaults.disabled ?? []);
+    if (enabled) disabled.delete(agent);
+    else disabled.add(agent);
+    let driver = this.defaults.driver;
+    if (!enabled && driver === agent) driver = undefined;
+    this.defaults = { ...this.defaults, driver, disabled: [...disabled] };
+
+    let persisted = false;
+    const file = process.env.BRAID_SETTINGS_FILE;
+    if (file) {
+      try {
+        // Read-modify-write only the fields this owns; the desktop app keeps the rest (models) in the same file.
+        const current = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+        current.disabled = [...disabled];
+        if (current.default_agent === agent && !enabled) current.default_agent = null;
+        const tmp = `${file}.${process.pid}.tmp`;
+        writeFileSync(tmp, JSON.stringify(current, null, 2));
+        renameSync(tmp, file);
+        persisted = true;
+      } catch {
+        /* the in-memory change still applies to this window */
+      }
+    }
+    return { disabled: [...disabled], driver, persisted };
   }
 
   isDisabled(agent: string): boolean {

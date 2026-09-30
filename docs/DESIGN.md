@@ -76,7 +76,7 @@ containers (see the roadmap) for untrusted work.
 3. ~~**Watch UI.**~~ Shipped as `braid watch`, `braid run --watch` and `braid demo`: a local read-only page (`ui/index.html`, `src/watch.ts`) that tails the run files over SSE.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.
-6. **Evals.** Started: `braid eval <suite.json> --variants claude:sonnet,codex` runs each case in a throwaway repo and reports pass rate, spend, $ per passing case, time and attempts per variant (`src/eval.ts`, starter suite in `evals/`). A case passes only if hidden acceptance tests, copied in after the run, pass on the integration branch, so agents cannot game it. Still to do: a larger suite of real-repo cases, repeated runs for variance, and a compare command over saved results.
+6. **Evals.** A fixed benchmark of real tasks tracking pass rate, cost and wall time per driver and model. A first version (`braid eval`, hidden acceptance tests per case) was built and removed; the token and cost display covers what we need to show users for now.
 7. **More drivers.** Gemini CLI is in (`src/drivers/gemini.ts`, `driver: "gemini"`), written against the event schema in the gemini-cli 0.53 source but not yet run against a signed-in install. Workers run in `auto_edit` and reviewers in `plan`, so `allowedTools` and `maxTurns` do not apply, and spend is estimated from token counts and list prices. Still to do: OpenCode, and local models through an OpenAI-compatible endpoint.
 8. ~~**Replanning.**~~ Shipped, opt-in: `maxReplans` in the plan or `braid run --replan N`. When a task fails for good, a read-only planner agent looks at the failed attempt and the failure reasons, then either splits the task, rewrites it, or gives up. Code validates the proposal (new unique ids, deps only on merged tasks or each other, no cycles, at most 6 tasks); replacements inherit the failed task's driver, checks and limits, and whatever waited on it now waits on the replacements. The task ends as `replaced` and counts as complete. A bad proposal or a spent replan budget leaves it failed as before. While the planner thinks the task is `replanning`, so dependents are not blocked early. Replacement tasks that fail can be replanned again until `maxReplans` is used up.
 9. **Standalone installers for Windows and macOS.** Two steps:
@@ -97,8 +97,7 @@ over the dollars. Claude's cache-heavy usage means a trivial prompt can show ten
 ## Cost estimates
 
 Claude reports dollars. Codex and Gemini report only tokens, so `src/pricing.ts` turns tokens into an
-estimated cost (fresh input, cached input and output priced separately) and `budgetUsd` and `braid eval`
-use that figure. It is a list-price estimate: rates drift, an unknown model falls back to the driver's
+estimated cost (fresh input, cached input and output priced separately) and `budgetUsd` use that figure. It is a list-price estimate: rates drift, an unknown model falls back to the driver's
 default (`gemini-2.5-pro`, `gpt-5-codex`), and subscription plans are not billed per token at all.
 Set `BRAID_PRICES` to a JSON file to correct or add prices:
 

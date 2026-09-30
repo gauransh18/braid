@@ -2,10 +2,11 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { open, readdir, readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DriverRegistry } from './drivers/driver.js';
-import { HttpError, RunManager } from './runs.js';
+import { checkTools } from './doctor.js';
+import { detectVerify, HttpError, RunManager } from './runs.js';
 import { RunStore, stateRoot } from './store.js';
 
 const UI_PATH = fileURLToPath(new URL('../../ui/index.html', import.meta.url));
@@ -119,7 +120,10 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
   if (!tokenOk(req, control.token)) return send(res, 401, { error: 'missing or wrong token' });
   const { runs } = control;
 
-  if (parts[1] === 'status' && req.method === 'GET') return send(res, 200, { active: runs.activeRunId });
+  if (parts[1] === 'status' && req.method === 'GET') {
+    return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo) });
+  }
+  if (parts[1] === 'doctor' && req.method === 'GET') return send(res, 200, await checkTools());
 
   if (parts[1] === 'plans' && req.method === 'GET') {
     const dir = join(repo, 'plans');
@@ -166,7 +170,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (parts[0] === 'api' && parts[1] === 'config' && req.method === 'GET') return send(res, 200, { control: !!control });
-  const writes = ['status', 'plans', 'plan-draft'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
+  const writes = ['status', 'plans', 'plan-draft', 'doctor'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
   if (parts[0] === 'api' && writes) {
     if (!control) return send(res, 405, { error: 'read-only' });
     return handleControl(repo, req, res, parts, control);

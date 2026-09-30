@@ -114,6 +114,42 @@ button { font: inherit; color: inherit; }
 .btn.danger { color: var(--err); }
 .btn[disabled] { opacity: .5; cursor: default; }
 [hidden] { display: none !important; }
+.composer { width: min(720px, 100%); margin: 0 auto; text-align: left; display: flex; flex-direction: column; gap: 14px; color: var(--text); }
+.composer h2 { margin: 0; font-size: 20px; }
+.composer .lede { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.composer label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.composer .row > label { flex: 1 1 200px; }
+.composer input, .composer textarea, .composer select {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; width: 100%;
+}
+.composer textarea { resize: vertical; line-height: 1.45; }
+.composer textarea.code { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 12px; min-height: 220px; }
+.composer input:focus, .composer textarea:focus, .composer select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.composer .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.composer .row.quiet { align-items: center; color: var(--muted); font-size: 13px; }
+.composer .row.quiet select { width: auto; font-size: 13px; padding: 5px 8px; }
+.composer .linkish { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.composer .actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+.composer .err { font-size: 13px; color: var(--err); min-height: 1.2em; white-space: pre-wrap; }
+.composer .err.ok { color: var(--muted); }
+.composer .note { font-size: 12px; color: var(--muted); margin: 0; }
+.composer .how { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 2px 0 0; padding: 0; list-style: none; counter-reset: s; }
+.composer .how li { counter-increment: s; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.composer .how li::before { content: counter(s); display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 11px; margin-right: 6px; }
+.composer .how b { color: var(--text); font-weight: 600; }
+.composer .agents { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+.composer .agents .chip-a { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); }
+.composer .agents .chip-a.ok { color: var(--ok); border-color: transparent; background: var(--ok-soft); }
+.composer .agents .warn { color: var(--warn); flex-basis: 100%; }
+.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tasks li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.tasks .t { font-weight: 600; font-size: 14px; }
+.tasks .id { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); margin-left: 6px; font-weight: 400; }
+.tasks .p { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+.tasks .d { font-size: 11px; color: var(--faint); margin-top: 4px; }
+.composer details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.empty.start { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 34px 20px 50px; }
+.empty.start canvas { width: 72px; height: 72px; }
 dialog.sheet {
   border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(680px, 94vw); box-shadow: var(--shadow);
 }
@@ -282,23 +318,45 @@ svg.threads path.dim { opacity: .18; }
 
 <main id="main"></main>
 
-<dialog class="sheet" id="newRunDlg" aria-labelledby="nrTitle">
-  <form method="dialog" id="newRunForm">
-    <h3 class="pixel" id="nrTitle">New run</h3>
-    <div class="row">
-      <label>Goal (to draft a plan)<input id="nrGoal" placeholder="add rate limiting to the API" autocomplete="off"></label>
-      <label>Verify command<input id="nrVerify" placeholder="npm test" autocomplete="off"></label>
-      <button type="button" class="btn" id="nrDraft">Draft plan</button>
+<template id="composerTpl">
+  <section class="composer">
+    <div data-step="goal">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <h2 class="pixel">What should the agents work on?</h2>
+        <p class="lede">Describe the goal. braid drafts a plan of small tasks, and each one runs in its own git worktree. Only work that passes your checks is merged, onto a separate branch that you review. Your own branches are never touched.</p>
+        <label>Goal<textarea data-f="goal" rows="3" placeholder="Add rate limiting to the API and cover it with tests"></textarea></label>
+        <div class="row">
+          <label>Every task must pass this command<input data-f="verify" placeholder="npm test" autocomplete="off"></label>
+          <button type="button" class="btn primary" data-a="draft">Draft a plan</button>
+        </div>
+        <div class="row quiet"><select data-f="saved" aria-label="Saved plans"><option value="">Load a saved plan...</option></select><span>or</span><button type="button" class="linkish" data-a="manual">write the plan yourself</button></div>
+        <div class="err" data-f="err-goal" role="alert"></div>
+        <ol class="how">
+          <li><b>Plan.</b> The goal becomes tasks you can edit.</li>
+          <li><b>Work.</b> An agent per task, in an isolated worktree.</li>
+          <li><b>Check.</b> Your command, plus an optional reviewer.</li>
+          <li><b>Merge.</b> Verified work lands on a branch you review.</li>
+        </ol>
+        <div class="agents" data-f="agents"></div>
+      </div>
     </div>
-    <div class="row">
-      <label>Or load a saved plan (plans/ in the repo)<select id="nrPlans"><option value="">-</option></select></label>
-      <label>Spend cap (USD)<input id="nrBudget" type="number" min="0.01" step="0.5" value="5"></label>
+    <div data-step="review" hidden>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <h2 class="pixel">Review the plan</h2>
+        <div data-f="summary"></div>
+        <details data-f="jsonBox"><summary>Edit the plan as JSON</summary><textarea class="code" data-f="json" spellcheck="false"></textarea></details>
+        <div class="row">
+          <label style="flex:0 0 200px">Spend cap (USD)<input type="number" min="0.01" step="0.5" value="5" data-f="budget"></label>
+          <p class="note" style="flex:1 1 220px">The run stops on its own once it has spent this much.</p>
+        </div>
+        <div class="err" data-f="err-review" role="alert"></div>
+        <div class="actions"><button type="button" class="btn" data-a="back">Back</button><button type="button" class="btn primary" data-a="start">Start run</button></div>
+      </div>
     </div>
-    <label>Plan (JSON, edit before starting)<textarea id="nrPlan" spellcheck="false" placeholder='{"goal": "...", "tasks": [{"id": "a", "title": "...", "prompt": "..."}]}'></textarea></label>
-    <div class="note">Drafting uses the agent and costs a little. Starting a run lets agents edit files in isolated worktrees; nothing touches your branches.</div>
-    <div class="error" id="nrError" role="alert"></div>
-    <div class="actions"><button type="button" class="btn" id="nrCancel">Cancel</button><button type="button" class="btn primary" id="nrStart">Start run</button></div>
-  </form>
+  </section>
+</template>
+<dialog class="sheet" id="newRunDlg" aria-label="New run">
+  <div style="padding:18px 20px"><div id="dlgHost"></div><div style="text-align:right;margin-top:10px"><button type="button" class="btn" id="dlgClose">Close</button></div></div>
 </dialog>
 <dialog class="sheet" id="resumeDlg" aria-labelledby="rsTitle">
   <form method="dialog">
@@ -535,11 +593,24 @@ const colorOf = (id) => S.color[id] || '#9a9cb3';
 
 /* ================= render ================= */
 function renderEmpty() {
-  $('main').innerHTML = `<div class="empty"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas>
-    <div class="pixel" style="font-size:22px;color:var(--text)">No runs yet</div>
-    <div>Start one with <code class="mono">braid run plan.json --watch</code> or try <code class="mono">braid demo</code>.</div></div>`;
+  // Runs of this every few seconds must not wipe what someone is typing: only rebuild when the mode changes.
+  const mode = CTL.on ? 'start' : 'cli';
+  if ($('main').dataset.empty === mode) return;
+  $('main').dataset.empty = mode;
+  if (mode === 'start') {
+    $('main').innerHTML = `<div class="empty start"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas><div id="startHost" style="width:100%"></div></div>`;
+    mountComposer($('startHost')).focus();
+    $('bubble').textContent = 'Tell me what to build.';
+  } else {
+    $('main').innerHTML = `<div class="empty"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas>
+      <div class="pixel" style="font-size:22px;color:var(--text)">No runs yet</div>
+      <div>Draft a plan: <code class="mono">braid plan "your goal" --verify "npm test" --out plan.json</code></div>
+      <div>Then run it: <code class="mono">braid run plan.json --watch</code></div>
+      <div>Or see it work first: <code class="mono">braid demo</code></div>
+      <div style="font-size:12px">To start runs from this page, open it with <code class="mono">braid watch --control</code> or use the Braid desktop app.</div></div>`;
+    $('bubble').textContent = 'Zzz... nothing on the loom yet.';
+  }
   registerSprite($('emptyKnot'), () => ({ color: KNOT.color, tuft: KNOT.tuft, mood: 'sleep' }));
-  $('bubble').textContent = 'Zzz... nothing on the loom yet.';
 }
 
 function depthMap(tasks) {
@@ -561,6 +632,7 @@ function renderAll() {
   renderHeader();
   let main = $('layout');
   if (!main || main.dataset.run !== S.runId) {
+    delete $('main').dataset.empty;
     $('main').innerHTML = `<div class="layout" id="layout" data-run="${esc(S.runId)}">
       <section class="panel" aria-label="Task floor">
         <div class="panel-h"><h2 class="pixel">The floor</h2><span class="sub" id="floorSub"></span></div>
@@ -939,55 +1011,97 @@ function renderControls() {
 
 async function pollControl() {
   if (!CTL.on) return;
+  if (!S.runs.length) renderEmpty();
   try { CTL.active = (await api('GET', '/api/status')).active; } catch { CTL.active = null; }
   renderControls();
 }
 
+const esc2 = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/** One place to describe a goal, get a drafted plan, review it and start it. Used as the empty screen and in the dialog. */
+function mountComposer(host, onStarted) {
+  host.innerHTML = '';
+  host.appendChild($('composerTpl').content.cloneNode(true));
+  const q = (sel) => host.querySelector(sel);
+  const f = (name) => q(`[data-f="${name}"]`);
+  const act = (name) => q(`[data-a="${name}"]`);
+  const step = (name) => q(`[data-step="${name}"]`);
+  let plan = null;
+
+  const show = (name) => { step('goal').hidden = name !== 'goal'; step('review').hidden = name !== 'review'; };
+  const say = (which, text, ok) => { const el = f('err-' + which); el.textContent = text || ''; el.classList.toggle('ok', !!ok); };
+
+  function renderSummary() {
+    const tasks = plan.tasks || [];
+    f('summary').innerHTML = `<p class="lede"><b style="color:var(--text)">Goal:</b> ${esc2(plan.goal)}</p>` +
+      `<ol class="tasks">${tasks.map((t) => `<li><div class="t">${esc2(t.title || t.id)}<span class="id">${esc2(t.id)}</span></div>` +
+      `<div class="p">${esc2(String(t.prompt || '').slice(0, 220))}${String(t.prompt || '').length > 220 ? '...' : ''}</div>` +
+      `${t.deps?.length ? `<div class="d">runs after: ${t.deps.map(esc2).join(', ')}</div>` : ''}</li>`).join('')}</ol>`;
+    f('json').value = JSON.stringify(plan, null, 2);
+    if (plan.budgetUsd) f('budget').value = plan.budgetUsd;
+  }
+  function review(p) { plan = p; renderSummary(); say('review', ''); show('review'); }
+
+  // Environment: suggested check command, saved plans, and whether an agent CLI exists.
+  api('GET', '/api/status').then((st) => { if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
+  api('GET', '/api/plans').then((names) => { f('saved').innerHTML = '<option value="">Load a saved plan...</option>' + names.map((n) => `<option>${esc2(n)}</option>`).join(''); if (!names.length) { f('saved').hidden = true; f('saved').nextElementSibling.hidden = true; } }).catch(() => {});
+  api('GET', '/api/doctor').then((tools) => {
+    const agents = tools.filter((t) => ['claude', 'codex', 'gemini'].includes(t.name));
+    const any = agents.some((t) => t.ok);
+    f('agents').innerHTML = '<span>Agents on this machine:</span>' + agents.map((t) => `<span class="chip-a ${t.ok ? 'ok' : ''}" title="${esc2(t.ok ? t.version : 'not found. ' + t.install)}">${t.ok ? '&#10003;' : '&#10007;'} ${esc2(t.name)}</span>`).join('') +
+      (any ? '' : `<span class="warn">No agent CLI found. Install one (for example: ${esc2(agents.find((t) => t.name === 'claude')?.install || 'Claude Code')}), sign in once in a terminal, then reopen this window.</span>`);
+  }).catch(() => {});
+
+  act('draft').addEventListener('click', async () => {
+    const goal = f('goal').value.trim();
+    if (!goal) { say('goal', 'Describe what you want done first.'); f('goal').focus(); return; }
+    const btn = act('draft');
+    btn.disabled = true; btn.textContent = 'Drafting...';
+    say('goal', 'The planner is reading your repository. This takes a little while and costs a few cents.', true);
+    try {
+      const verify = f('verify').value.trim();
+      const res = await api('POST', '/api/plan-draft', { goal, verify: verify ? [verify] : [] });
+      review(res.plan);
+      say('review', `Drafted (planner spend ${fmtUsd(res.costUsd)}). Change anything you like before starting.`, true);
+    } catch (err) { say('goal', err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Draft a plan'; }
+  });
+  f('saved').addEventListener('change', async (e) => {
+    if (!e.target.value) return;
+    try { review(await api('GET', '/api/plans/' + encodeURIComponent(e.target.value))); } catch (err) { say('goal', err.message); }
+    e.target.value = '';
+  });
+  act('manual').addEventListener('click', () => {
+    plan = { goal: f('goal').value.trim() || 'Describe the goal', tasks: [{ id: 'task-1', title: 'First task', prompt: 'What this agent should do, and how you will know it is done.' }] };
+    const v = f('verify').value.trim();
+    if (v) plan.verify = [v];
+    renderSummary(); f('jsonBox').open = true; say('review', ''); show('review');
+  });
+  act('back').addEventListener('click', () => show('goal'));
+  act('start').addEventListener('click', async () => {
+    let toRun;
+    try { toRun = JSON.parse(f('json').value); } catch { say('review', 'The plan JSON is not valid. Fix it, or reload the plan by going Back.'); return; }
+    toRun.budgetUsd = Number(f('budget').value);
+    const btn = act('start'); btn.disabled = true; btn.textContent = 'Starting...';
+    try {
+      const { runId } = await api('POST', '/api/runs', { plan: toRun });
+      await loadRuns();
+      openRun(runId);
+      pollControl();
+      onStarted?.();
+    } catch (err) { say('review', err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Start run'; }
+  });
+  return { focus: () => f('goal').focus() };
+}
+
 async function openNewRun() {
-  $('nrError').textContent = '';
+  if (!S.runs.length) { $('main').querySelector('[data-f="goal"]')?.focus(); return; }
+  mountComposer($('dlgHost'), () => $('newRunDlg').close());
   $('newRunDlg').showModal();
-  try {
-    const names = await api('GET', '/api/plans');
-    $('nrPlans').innerHTML = '<option value="">-</option>' + names.map(n => `<option>${esc(n)}</option>`).join('');
-  } catch {}
 }
 $('newRunBtn').addEventListener('click', openNewRun);
-$('nrCancel').addEventListener('click', () => $('newRunDlg').close());
-$('nrPlans').addEventListener('change', async (e) => {
-  if (!e.target.value) return;
-  try {
-    const plan = await api('GET', '/api/plans/' + encodeURIComponent(e.target.value));
-    $('nrPlan').value = JSON.stringify(plan, null, 2);
-    if (plan.budgetUsd) $('nrBudget').value = plan.budgetUsd;
-  } catch (err) { $('nrError').textContent = err.message; }
-});
-$('nrDraft').addEventListener('click', async () => {
-  const btn = $('nrDraft');
-  $('nrError').textContent = '';
-  btn.disabled = true; btn.textContent = 'Drafting...';
-  try {
-    const verify = $('nrVerify').value.trim();
-    const { plan, costUsd } = await api('POST', '/api/plan-draft', { goal: $('nrGoal').value, verify: verify ? [verify] : [] });
-    $('nrPlan').value = JSON.stringify(plan, null, 2);
-    $('nrError').textContent = `Drafted (planner spend ${fmtUsd(costUsd)}). Edit it, then start.`;
-  } catch (err) { $('nrError').textContent = err.message; }
-  finally { btn.disabled = false; btn.textContent = 'Draft plan'; }
-});
-$('nrStart').addEventListener('click', async () => {
-  $('nrError').textContent = '';
-  let plan;
-  try { plan = JSON.parse($('nrPlan').value); } catch { $('nrError').textContent = 'The plan is not valid JSON.'; return; }
-  plan.budgetUsd = Number($('nrBudget').value);
-  $('nrStart').disabled = true;
-  try {
-    const { runId } = await api('POST', '/api/runs', { plan });
-    $('newRunDlg').close();
-    await loadRuns();
-    openRun(runId);
-    pollControl();
-  } catch (err) { $('nrError').textContent = err.message; }
-  finally { $('nrStart').disabled = false; }
-});
+$('dlgClose').addEventListener('click', () => $('newRunDlg').close());
 $('stopBtn').addEventListener('click', async () => {
   $('stopBtn').disabled = true;
   try { await api('POST', `/api/run/${S.runId}/stop`, {}); } catch {}

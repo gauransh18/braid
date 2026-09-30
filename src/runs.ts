@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DriverRegistry } from './drivers/driver.js';
@@ -130,4 +131,20 @@ async function markFailed(repo: string, runId: string): Promise<void> {
   } catch {
     /* no state yet: the run never got going */
   }
+}
+
+/**
+ * A check command to offer as the default, from what the repository looks like. Only a suggestion the person
+ * can change: getting it wrong costs nothing, and offering one nudges people to verify at all.
+ */
+export async function detectVerify(repo: string): Promise<string | null> {
+  // Unreadable or malformed package.json just means no suggestion.
+  const pkg = await readFile(join(repo, 'package.json'), 'utf8').then((t) => JSON.parse(t)).catch(() => null);
+  const test: unknown = pkg?.scripts?.test;
+  // `npm init` writes a placeholder script that always fails.
+  if (typeof test === 'string' && !/no test specified/.test(test)) return 'npm test';
+  if (existsSync(join(repo, 'Cargo.toml'))) return 'cargo test';
+  if (existsSync(join(repo, 'go.mod'))) return 'go test ./...';
+  if (existsSync(join(repo, 'pytest.ini')) || existsSync(join(repo, 'pyproject.toml')) || existsSync(join(repo, 'tox.ini'))) return 'pytest';
+  return null;
 }

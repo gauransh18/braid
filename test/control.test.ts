@@ -100,6 +100,17 @@ describe('control endpoints', () => {
     return status && status !== 'running' ? r.json.state : undefined;
   });
 
+  it('suggests a check command and reports which agent CLIs exist', async () => {
+    const status = (await authed(server, 'GET', '/api/status')).json;
+    assert.equal(status.active, null);
+    assert.equal(typeof status.repoName, 'string');
+    assert.equal(status.suggestedVerify, null, 'a bare repo has nothing to suggest');
+    const tools = (await authed(server, 'GET', '/api/doctor')).json as { name: string; ok: boolean }[];
+    assert.ok(tools.some((t) => t.name === 'git' && t.ok));
+    assert.deepEqual(['claude', 'codex', 'gemini'].filter((n) => !tools.some((t) => t.name === n)), []);
+    assert.equal((await call(server, 'GET', '/api/doctor')).status, 401);
+  });
+
   it('reports whether controls exist, without needing a token', async () => {
     assert.deepEqual((await call(server, 'GET', '/api/config')).json, { control: true });
     assert.deepEqual((await call(readOnly, 'GET', '/api/config')).json, { control: false });

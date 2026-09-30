@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
 import { addTokens, describeTokens, formatCost, formatTokens } from '../src/tokens.js';
@@ -6,6 +9,7 @@ import { ClaudeDriver, claudeTokens, parseClaudeLine } from '../src/drivers/clau
 import { estimateCostUsd, priceFor } from '../src/pricing.js';
 import { checkTools, doctorExitCode, formatDoctor } from '../src/doctor.js';
 import { exec, streamLines } from '../src/proc.js';
+import { detectVerify } from '../src/runs.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
 
@@ -197,5 +201,26 @@ describe('child process stdin', () => {
       process.off('uncaughtException', onUncaught);
     }
     assert.equal(uncaught, undefined);
+  });
+});
+
+describe('detectVerify', () => {
+  const repo = (files: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'braid-verify-'));
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+    return dir;
+  };
+
+  it('suggests a test command from what the repository contains', async () => {
+    assert.equal(await detectVerify(repo({ 'package.json': '{"scripts":{"test":"vitest run"}}' })), 'npm test');
+    assert.equal(await detectVerify(repo({ 'Cargo.toml': '[package]' })), 'cargo test');
+    assert.equal(await detectVerify(repo({ 'go.mod': 'module x' })), 'go test ./...');
+    assert.equal(await detectVerify(repo({ 'pyproject.toml': '' })), 'pytest');
+  });
+
+  it('does not suggest npm init\'s placeholder test script, and returns null when unsure', async () => {
+    assert.equal(await detectVerify(repo({ 'package.json': '{"scripts":{"test":"echo \\"Error: no test specified\\" && exit 1"}}' })), null);
+    assert.equal(await detectVerify(repo({ 'package.json': 'not json' })), null);
+    assert.equal(await detectVerify(repo({})), null);
   });
 });

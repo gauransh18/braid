@@ -74,8 +74,11 @@ braid demo                                # scripted mock run, no agents, no spe
 
 The dashboard opens at `http://127.0.0.1:4777`. It only listens on this machine and is read-only by default.
 
-`braid watch --control` (and the desktop app) adds **New run**, **Stop** and **Resume** buttons: draft a plan from a
-goal or load one from `plans/`, edit it, set a spend cap, start it. One run is active at a time. These endpoints can
+`braid watch --control` (and the desktop app) turns an empty repository into a guided start: describe a goal, and braid
+drafts a plan you can review and edit (tasks, dependencies, the command every task must pass, pre-filled from your
+`package.json`, `Cargo.toml`, `go.mod` or pytest config), set a spend cap, and start it. It also shows which agent CLIs are
+installed. Later runs use the **New run** button (same steps), plus **Stop** and **Resume**. You can also load a saved plan
+from `plans/`. One run is active at a time. These endpoints can
 start agents, so they need a per-session token (from `BRAID_CONTROL_TOKEN`, or generated and printed as `#token=...`
 after the URL; it never travels in argv or the request URL), they refuse requests from other origins, and a run started
 this way must have a `budgetUsd`. Reading runs and transcripts does not need the token.

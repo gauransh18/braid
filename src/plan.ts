@@ -32,6 +32,12 @@ export function validatePlan(plan: PlanSpec): void {
   for (const t of plan?.tasks ?? []) {
     for (const d of t.deps ?? []) if (!ids.has(d)) errors.push(`task "${t.id}" depends on unknown "${d}"`);
   }
+  const sb = plan?.sandbox;
+  if (sb) {
+    if (!sb.image || typeof sb.image !== 'string') errors.push('sandbox.image must be a string');
+    for (const name of sb.env ?? []) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) errors.push(`sandbox.env "${name}" must be a variable NAME, not NAME=value`);
+    if (sb.env?.length && !sb.agent) errors.push('sandbox.env only applies when sandbox.agent is true');
+  }
   if (errors.length === 0) {
     const cycle = findCycle(plan.tasks);
     if (cycle) errors.push(`dependency cycle: ${cycle.join(' -> ')}`);

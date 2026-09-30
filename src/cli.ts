@@ -21,7 +21,7 @@ const USAGE = `braid - headless multi-agent harness
 
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
-  braid run <plan.json> [--concurrency N] [--budget USD] [--replan N] [--keep-worktrees] [--watch]
+  braid run <plan.json> [--concurrency N] [--budget USD] [--replan N] [--sandbox IMAGE] [--keep-worktrees] [--watch]
   braid resume [runId] [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777]      live dashboard for this repo's runs
@@ -67,6 +67,9 @@ function printEvent(e: HarnessEvent): void {
     case 'replan':
       console.log(`${t} ${who} replan -> ${e.ok ? `replaced by ${(e.added as string[]).join(', ')}${e.reason ? ` (${e.reason})` : ''}` : `not replaced: ${String(e.reason).split('\n')[0]}`}`);
       break;
+    case 'sandbox':
+      console.log(`${t} sandbox: ${e.runtime} ${e.image}${e.agent ? ' (agent runs inside too)' : ' (setup and verify only)'}`);
+      break;
     case 'run_resume':
       console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
       break;
@@ -107,6 +110,7 @@ async function main(argv: string[]): Promise<number> {
       model: { type: 'string' },
       concurrency: { type: 'string' },
       replan: { type: 'string' },
+      sandbox: { type: 'string' },
       budget: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
@@ -170,6 +174,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     if (values.concurrency) plan.concurrency = Number(values.concurrency);
     if (values.budget) plan.budgetUsd = Number(values.budget);
     if (values.replan) plan.maxReplans = Number(values.replan);
+    if (values.sandbox) plan.sandbox = { ...plan.sandbox, image: values.sandbox };
     if (values.driver) plan.driver = values.driver;
     const ac = new AbortController();
     process.on('SIGINT', () => {

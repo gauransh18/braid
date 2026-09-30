@@ -21,6 +21,22 @@ export interface TaskSpec {
   maxTurns?: number;
 }
 
+/** Run task commands (and optionally the agent) in a container. Needs Docker or Podman. */
+export interface SandboxSpec {
+  /** Image for setup, verify and, with `agent`, the agent. Must contain your toolchain (e.g. node:22). */
+  image: string;
+  /** Also run the agent CLI in the container, which makes it safe to allow `Bash`. The image must contain the CLI. */
+  agent?: boolean;
+  /** Host environment variable NAMES to pass to the agent, e.g. ANTHROPIC_API_KEY. Values are never read by braid. */
+  env?: string[];
+  /** Give verify commands network access. Setup and the agent always have it. Default false. */
+  network?: boolean;
+  /** Container memory limit, e.g. "4g". */
+  memory?: string;
+  /** Container CPU limit, e.g. "2". */
+  cpus?: string;
+}
+
 export interface PlanSpec {
   goal: string;
   /** Branch the run starts from. Never modified by the harness. */
@@ -39,6 +55,7 @@ export interface PlanSpec {
   maxTurns?: number;
   /** How many times the run may ask the planner to split or rewrite a task that failed for good. 0 (default) = never. */
   maxReplans?: number;
+  sandbox?: SandboxSpec;
   tasks: TaskSpec[];
 }
 

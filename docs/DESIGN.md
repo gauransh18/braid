@@ -59,8 +59,8 @@ plan.json ─► Orchestrator (code, deterministic)
 Headless agents cannot ask for permission, so any tool not on the allowlist is denied. The default is
 `Read, Edit, Write, Glob, Grep`: no Bash, no network tools. Verify and setup commands come from the
 plan (your team's own config) and run in a shell. A worktree is **not** a sandbox. An agent that is
-allowed Bash can reach anything your user can. Only grant `Bash(...)` patterns you trust, and use
-containers (see the roadmap) for untrusted work.
+allowed Bash can reach anything your user can. Only grant `Bash(...)` patterns you trust, and use the
+container `sandbox` (`agent: true`) for untrusted work. Without a sandbox, verify and setup commands also run on the host, and they execute code the agents wrote.
 
 ## Team usage (now)
 
@@ -74,7 +74,7 @@ containers (see the roadmap) for untrusted work.
 1. ~~**Cheaper conflict handling.**~~ Shipped. On a merge conflict braid merges the newer integration work into the task branch, and a narrow resolver agent removes the markers while keeping both sides' changes. The task is not redone. Nothing is committed while markers remain. A combined-tree verify failure is fixed on top of the existing work the same way. In the real smoke run the resolver cost $0.09, versus about $0.21 for a full redo.
 2. ~~**Resume.**~~ Shipped as `braid resume [runId]`. Merged tasks stay done, every other task is retried with fresh attempts, and spend carries over so the budget covers the whole run. The integration branch is rewound to `verifiedHead` (the head after the last verified merge), which drops any half-done merge from a crash. A run whose process is still alive is refused.
 3. ~~**Watch UI.**~~ Shipped as `braid watch`, `braid run --watch` and `braid demo`: a local read-only page (`ui/index.html`, `src/watch.ts`) that tails the run files over SSE.
-4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
+4. ~~**Container sandbox.**~~ Shipped, opt-in: a `sandbox` section in the plan (or `braid run --sandbox IMAGE`), Docker or Podman (`src/sandbox.ts`). Setup and verify commands run in a throwaway container with only the task worktree mounted at `/work`, all capabilities dropped, no privilege escalation, your uid, and no network for verify (setup keeps it). With `agent: true` the agent CLI runs in the container too, which is what makes `Bash(...)` in `allowedTools` safe: it can only touch the worktree, not your other branches, your `.git` or your home directory. Secrets are passed by variable name (`env`), never by value. Checked against real Docker for setup and verify (isolation, no network, file ownership, an image with its own `ENTRYPOINT`); running the agent inside a container is covered only by a fake runtime, since it needs an image with the agent CLI installed (see `examples/sandbox/Dockerfile`). Not done: Windows path mapping, Podman rootless quirks, and cleanup of containers if braid is killed with SIGKILL.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.
 6. **Evals.** A fixed benchmark of real tasks tracking pass rate, cost and wall time per driver and model. A first version (`braid eval`, hidden acceptance tests per case) was built and removed; the token and cost display covers what we need to show users for now.
 7. **More drivers.** Gemini CLI is in (`src/drivers/gemini.ts`, `driver: "gemini"`), written against the event schema in the gemini-cli 0.53 source but not yet run against a signed-in install. Workers run in `auto_edit` and reviewers in `plan`, so `allowedTools` and `maxTurns` do not apply, and spend is estimated from token counts and list prices. Still to do: OpenCode, and local models through an OpenAI-compatible endpoint.

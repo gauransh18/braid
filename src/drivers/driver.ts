@@ -1,3 +1,4 @@
+import type { Wrap } from '../sandbox.js';
 import type { AgentEvent, AgentResult } from '../types.js';
 
 export interface DriverRunOptions {
@@ -10,6 +11,8 @@ export interface DriverRunOptions {
   /** Allow file edits. False for planner/reviewer agents. */
   canEdit: boolean;
   signal?: AbortSignal;
+  /** Runs the agent CLI inside a container when the plan has a sandbox with `agent: true`. */
+  wrap?: Wrap;
   onEvent?: (e: AgentEvent) => void;
 }
 

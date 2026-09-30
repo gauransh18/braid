@@ -34,7 +34,7 @@ export class ClaudeDriver implements Driver {
     const { code, stderr } = await streamLines(
       this.bin,
       this.buildArgs(opts),
-      { cwd: opts.cwd, input: opts.prompt, signal: opts.signal },
+      { cwd: opts.cwd, input: opts.prompt, signal: opts.signal, wrap: opts.wrap },
       (line) => {
         for (const e of parseClaudeLine(line)) {
           if (e.kind === 'result') result = { ok: e.ok, text: e.text, costUsd: e.costUsd, tokens: e.tokens, sessionId: e.sessionId };

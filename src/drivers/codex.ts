@@ -30,7 +30,7 @@ export class CodexDriver implements Driver {
     const { code, stderr } = await streamLines(
       this.bin,
       this.buildArgs(opts),
-      { cwd: opts.cwd, input: opts.prompt, signal: opts.signal },
+      { cwd: opts.cwd, input: opts.prompt, signal: opts.signal, wrap: opts.wrap },
       (line) => {
         let msg: any;
         try {

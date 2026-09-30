@@ -1,0 +1,17 @@
+{
+  "goal": "Add input validation to the user API",
+  "budgetUsd": 5,
+  "setup": ["npm ci"],
+  "verify": ["npm test"],
+  "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(npm test)", "Bash(npm run lint)"],
+  "sandbox": {
+    "image": "braid-claude",
+    "agent": true,
+    "env": ["CLAUDE_CODE_OAUTH_TOKEN"],
+    "memory": "4g",
+    "cpus": "2"
+  },
+  "tasks": [
+    { "id": "validate", "title": "Validate payloads", "prompt": "Add validation to src/routes/users.ts and tests. Run the tests before finishing." }
+  ]
+}

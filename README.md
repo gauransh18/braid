@@ -69,6 +69,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `concurrency` | plan | Maximum tasks running at once (default 3) |
 | `budgetUsd` | plan | Hard spend cap for the run |
 | `maxReplans` | plan | Times the planner may split or rewrite a task that failed for good (default 0, off) |
+| `sandbox` | plan | Run setup, verify and optionally the agent in a Docker/Podman container. See [Sandbox](#sandbox) |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |
 | `driver`, `model` | both | `claude` (default), `codex`, `gemini`, `mock` |
 | `verify` | both | Commands that must exit 0 |
@@ -79,6 +80,21 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `id`, `title`, `prompt`, `deps` | task | The task itself |
 
 Values set on a task override the plan-level values.
+
+## Sandbox
+
+A worktree is not a sandbox: verify and setup commands run on your machine, and an agent that is allowed
+`Bash` can reach anything you can. Add a `sandbox` to the plan to run them in a container instead
+(needs Docker or Podman running):
+
+```json
+"sandbox": { "image": "node:22", "agent": true, "env": ["CLAUDE_CODE_OAUTH_TOKEN"], "memory": "4g" }
+```
+
+- **Setup and verify** run in a throwaway container. Only that task's worktree is mounted, at `/work`. All capabilities are dropped and it runs as you. Verify has no network unless `"network": true`; setup keeps it so `npm ci` works.
+- **`agent: true`** runs the agent CLI in the container too, so allowing `Bash(...)` is safe: it cannot see your other branches, your `.git` or your home directory. The image must contain the CLI, see [examples/sandbox](examples/sandbox). `env` lists variable names to pass in; braid never reads their values.
+- `braid run plan.json --sandbox node:22` sets just the image. Set `BRAID_CONTAINER_RUNTIME` to pick `podman` or another binary.
+- Inside the container the worktree's `.git` is not available, so commands that call git will fail.
 
 ## Where things live
 

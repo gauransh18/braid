@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import type { CommandSpec, Wrap } from './sandbox.js';
 
 export interface ExecResult {
   code: number;
@@ -30,9 +31,11 @@ export async function exec(
 }
 
 /** Run a user-supplied shell command line (verify steps). Output is capped. */
-export async function shell(command: string, cwd: string, timeoutMs = 10 * 60_000): Promise<ExecResult> {
+export async function shell(command: string, cwd: string, timeoutMs = 10 * 60_000, sandboxed?: CommandSpec): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true, windowsHide: true });
+    const child = sandboxed
+      ? spawn(sandboxed.cmd, sandboxed.args, { cwd, windowsHide: true })
+      : spawn(command, { cwd, shell: true, windowsHide: true });
     let out = '';
     const append = (d: Buffer) => {
       out += d;
@@ -56,10 +59,11 @@ export async function shell(command: string, cwd: string, timeoutMs = 10 * 60_00
 export async function streamLines(
   cmd: string,
   args: string[],
-  opts: { cwd: string; input: string; signal?: AbortSignal; env?: NodeJS.ProcessEnv },
+  opts: { cwd: string; input: string; signal?: AbortSignal; env?: NodeJS.ProcessEnv; wrap?: Wrap },
   onLine: (line: string) => void,
 ): Promise<{ code: number; stderr: string }> {
-  const child = spawn(cmd, args, {
+  const run = opts.wrap ? opts.wrap({ cmd, args }) : { cmd, args };
+  const child = spawn(run.cmd, run.args, {
     cwd: opts.cwd,
     windowsHide: true,
     env: opts.env ?? process.env,

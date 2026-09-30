@@ -3,6 +3,7 @@ import type { DriverRegistry } from './drivers/driver.js';
 import { Git } from './git.js';
 import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { shell } from './proc.js';
+import { Sandbox } from './sandbox.js';
 import { readFile } from 'node:fs/promises';
 import { conflictPrompt, extractJson, replanPrompt, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
 import { newRunId, RunStore, stateRoot } from './store.js';
@@ -19,6 +20,8 @@ export interface OrchestratorOptions {
   keepWorktrees?: boolean;
   /** Continue the existing run `runId`: merged tasks stay done, everything else is retried. */
   resume?: boolean;
+  /** Pre-built sandbox (tests). Otherwise one is created from `plan.sandbox`. */
+  sandbox?: Sandbox;
 }
 
 const TERMINAL: TaskStatus[] = ['done', 'failed', 'blocked', 'skipped', 'replaced'];
@@ -37,6 +40,7 @@ export class Orchestrator {
   private readonly tasks: Map<string, ResolvedTask>;
   private state!: RunState;
   private integrationDir!: string;
+  private sandbox?: Sandbox;
   private mergeChain: Promise<unknown> = Promise.resolve();
   private saveChain: Promise<void> = Promise.resolve();
   private saveQueued = false;
@@ -84,6 +88,10 @@ export class Orchestrator {
   async run(): Promise<RunState> {
     const { repo, plan } = this.opts;
     await this.git.excludeStateDir();
+    if (plan.sandbox) {
+      // Fail before creating any worktree if there is no working container runtime.
+      this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox));
+    }
     this.integrationDir = this.worktreeDir('_integration');
     if (this.opts.resume) {
       await this.restore();
@@ -112,6 +120,9 @@ export class Orchestrator {
     await this.runSetup(this.integrationDir);
     if (!this.opts.resume) {
       this.store.event('run_start', { base: this.state.base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
+    }
+    if (this.sandbox) {
+      this.store.event('sandbox', { runtime: this.sandbox.runtime, image: this.sandbox.spec.image, agent: !!this.sandbox.spec.agent });
     }
     await this.save();
 
@@ -203,9 +214,14 @@ export class Orchestrator {
     }
   }
 
+  /** Run a setup or verify command on the host, or in the sandbox container when the plan has one. */
+  private sh(command: string, cwd: string, phase: 'setup' | 'verify') {
+    return shell(command, cwd, undefined, this.sandbox?.command(cwd, command, phase));
+  }
+
   private async runSetup(cwd: string): Promise<{ ok: boolean; output: string }> {
     for (const cmd of this.plan.setup ?? []) {
-      const res = await shell(cmd, cwd);
+      const res = await this.sh(cmd, cwd, 'setup');
       if (res.code !== 0) return { ok: false, output: `setup \`${cmd}\` exited ${res.code}\n${tail(res.stdout + res.stderr)}` };
     }
     return { ok: true, output: '' };
@@ -213,7 +229,7 @@ export class Orchestrator {
 
   private async verify(task: ResolvedTask, cwd: string): Promise<{ ok: boolean; report: string }> {
     for (const cmd of task.verify) {
-      const res = await shell(cmd, cwd);
+      const res = await this.sh(cmd, cwd, 'verify');
       this.store.event('verify', { task: task.id, cmd, code: res.code, dir: cwd === this.integrationDir ? 'integration' : 'task' });
       if (res.code !== 0) return { ok: false, report: `\`${cmd}\` exited ${res.code}:\n${tail(res.stdout + res.stderr)}` };
     }
@@ -262,6 +278,7 @@ export class Orchestrator {
           allowedTools: task.allowedTools,
           canEdit: true,
           signal: this.opts.signal,
+          wrap: this.sandbox?.agentWrap(dir),
           onEvent: this.store.agentLog(task.id, attempt, resolving ? 'resolver' : 'worker'),
         });
         this.addUsage(s, work);
@@ -362,6 +379,7 @@ export class Orchestrator {
         canEdit: false,
         maxTurns: 20,
         signal: this.opts.signal,
+        wrap: this.sandbox?.agentWrap(dir),
         onEvent: this.store.agentLog(task.id, used + 1, 'replanner'),
       });
       this.addUsage(s, res);
@@ -412,6 +430,7 @@ export class Orchestrator {
       canEdit: false,
       maxTurns: 15,
       signal: this.opts.signal,
+      wrap: this.sandbox?.agentWrap(dir),
       onEvent: this.store.agentLog(task.id, attempt, 'reviewer'),
     });
     this.addUsage(s, res);

@@ -151,7 +151,7 @@ svg.threads path.dim { opacity: .18; }
 .chip.running, .chip.resolving, .chip.verifying, .chip.reviewing, .chip.merging { background: var(--info-soft); color: var(--info); }
 .chip.done { background: var(--ok-soft); color: var(--ok); }
 .chip.failed { background: var(--err-soft); color: var(--err); }
-.chip.blocked { background: var(--warn-soft); color: var(--warn); }
+.chip.blocked, .chip.replanning, .chip.replaced { background: var(--warn-soft); color: var(--warn); }
 .dots { display: inline-flex; gap: 3px; }
 .dots i { width: 7px; height: 7px; border-radius: 2px; background: var(--line-2); }
 .dots i.used { background: var(--tc); }
@@ -272,7 +272,7 @@ svg.threads path.dim { opacity: .18; }
 /* ================= palette + sprites ================= */
 const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
 const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
-const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost' };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost', replanning: 'inspect', replaced: 'ghost' };
 
 function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
 function mix(h, target, amt) {
@@ -451,7 +451,10 @@ async function openRun(id) {
   let pending = false;
   const schedule = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; renderAll(); }); } };
   es.addEventListener('harness', (m) => {
-    try { const e = JSON.parse(m.data); e._new = true; S.events.push(e); } catch {}
+    let replanned = false;
+    try { const e = JSON.parse(m.data); e._new = true; S.events.push(e); replanned = e.type === 'replan' && e.ok; } catch {}
+    // The planner added tasks: reload the plan and rebuild the floor so the new desks appear.
+    if (replanned) getJSON(`/api/run/${id}`).then(d => { S.plan = d.plan; assignColors(); const l = $('layout'); if (l) l.dataset.run = ''; schedule(); }).catch(() => {});
     if (!S.plan) getJSON(`/api/run/${id}`).then(d => { S.plan = d.plan; assignColors(); schedule(); }).catch(() => {});
     schedule();
   });
@@ -637,7 +640,7 @@ function drawThreads() {
         p = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
       }
       const ts = S.state.tasks[t.id]?.status;
-      const cls = ['running', 'resolving', 'verifying', 'reviewing', 'merging'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' ? 'dim' : '';
+      const cls = ['running', 'resolving', 'verifying', 'reviewing', 'merging', 'replanning'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' || ts === 'replaced' ? 'dim' : '';
       paths.push(`<path d="${p}" stroke="${colorOf(d)}" class="${cls}"/>`);
     }
   }
@@ -742,7 +745,7 @@ function openInspector(id) {
   poll();
   S.logTimer = setInterval(() => {
     const st = S.state?.tasks[S.selected]?.status;
-    if (st && !['done', 'failed', 'blocked', 'skipped'].includes(st)) poll();
+    if (st && !['done', 'failed', 'blocked', 'skipped', 'replaced'].includes(st)) poll();
   }, 1500);
   $('insClose').focus();
 }
@@ -786,7 +789,7 @@ function renderLogs() {
   if (!logs.length) { tabs.innerHTML = ''; tx.innerHTML = '<div style="color:var(--muted)">No agent activity yet.</div>'; return; }
   const key = (l) => `${l.role}-${l.attempt}`;
   if (!S.logTab || !logs.some(l => key(l) === S.logTab)) S.logTab = key(logs[logs.length - 1]);
-  tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : l.role === 'resolver' ? 'Resolver' : 'Reviewer'} #${l.attempt}</button>`).join('');
+  tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : l.role === 'resolver' ? 'Resolver' : l.role === 'replanner' ? 'Replanner' : 'Reviewer'} #${l.attempt}</button>`).join('');
   tabs.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { S.logTab = b.dataset.k; renderLogs(); }));
   const log = logs.find(l => key(l) === S.logTab);
   const nearBottom = $('insBody').scrollHeight - $('insBody').scrollTop - $('insBody').clientHeight < 80;

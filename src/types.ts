@@ -37,6 +37,8 @@ export interface PlanSpec {
   maxAttempts?: number;
   allowedTools?: string[];
   maxTurns?: number;
+  /** How many times the run may ask the planner to split or rewrite a task that failed for good. 0 (default) = never. */
+  maxReplans?: number;
   tasks: TaskSpec[];
 }
 
@@ -46,11 +48,15 @@ export type TaskStatus =
   | 'resolving'
   | 'verifying'
   | 'reviewing'
+  /** Failed for good; the planner is deciding how to split or rewrite it. Dependents keep waiting. */
+  | 'replanning'
   | 'merging'
   | 'done'
   | 'failed'
   | 'blocked'
-  | 'skipped';
+  | 'skipped'
+  /** Failed for good, then swapped for new tasks by the planner. Counts as complete for the run. */
+  | 'replaced';
 
 export interface TaskState {
   id: string;
@@ -63,6 +69,10 @@ export interface TaskState {
   error?: string;
   startedAt?: string;
   endedAt?: string;
+  /** Set on a replaced task: the tasks that took its place. */
+  replacedBy?: string[];
+  /** Set on a task the planner created: the failed task it replaces. */
+  replanOf?: string;
 }
 
 export interface RunState {
@@ -80,6 +90,8 @@ export interface RunState {
   /** Process driving the run, so resume can refuse a run that is still alive. */
   pid?: number;
   resumes?: number;
+  /** Planner calls made to replace failed tasks. */
+  replans?: number;
   tasks: Record<string, TaskState>;
 }
 

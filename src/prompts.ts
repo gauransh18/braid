@@ -1,5 +1,5 @@
 import type { PlanSpec } from './types.js';
-import type { ResolvedTask } from './plan.js';
+import { MAX_REPLACEMENT_TASKS, type ResolvedTask } from './plan.js';
 
 export interface Feedback {
   attempt: number;
@@ -65,6 +65,30 @@ export function reviewerPrompt(plan: PlanSpec, task: ResolvedTask, diff: string)
     'Review the diff for correctness bugs, missing requirements, and changes outside the task scope. You may read files in the current directory for context. Ignore style nits.',
     `Diff:\n\`\`\`diff\n${diff || '(empty diff)'}\n\`\`\``,
     'Reply with ONLY a JSON object, no prose: {"approve": boolean, "issues": ["concrete problem and where", ...]}. Approve when there are no blocking issues.',
+  ].join('\n\n');
+}
+
+/** Ask the planner why a task failed for good and what should replace it. */
+export function replanPrompt(
+  plan: PlanSpec,
+  task: ResolvedTask,
+  failures: Feedback[],
+  others: { id: string; title: string; status: string; deps: string[] }[],
+): string {
+  return [
+    'You are the planner for a team of coding agents. One task failed after every retry, and its dependents are stuck. Decide how to unblock them.',
+    `Overall goal: ${plan.goal}`,
+    `Failed task (${task.id}): ${task.title}\n${task.prompt}`,
+    `Why the attempts were rejected (oldest first):\n${failures.slice(-4).map((f) => `Attempt ${f.attempt}: ${f.reason.slice(0, 1500)}`).join('\n\n') || '(no details)'}`,
+    `Rest of the plan:\n${others.map((t) => `- ${t.id} [${t.status}] ${t.title}${t.deps.length ? ` (after ${t.deps.join(', ')})` : ''}`).join('\n')}`,
+    'The current directory holds the failed attempt, so read the code to see what went wrong. Then choose:',
+    [
+      '- SPLIT the task into smaller, more focused tasks, if it was too big or mixed unrelated concerns.',
+      '- REWRITE it as one task with a clearer, more specific prompt that avoids the failure, e.g. naming the files, the approach, or the pitfall.',
+      '- GIVE UP if retrying with different instructions cannot help (a broken environment, a flaky or wrong check, a missing dependency). Say why.',
+    ].join('\n'),
+    `Replacement tasks must be self-contained (objective, files, definition of done), at most ${MAX_REPLACEMENT_TASKS}, with new kebab-case ids that differ from every id above. "deps" may name only tasks marked done above or other replacement tasks; leave it empty to inherit the failed task's. Do not restate the rest of the plan.`,
+    'Reply with ONLY a JSON object, no prose: {"action": "replace" | "give_up", "reason": string, "tasks": [{"id": string, "title": string, "prompt": string, "deps": [ids]}]}',
   ].join('\n\n');
 }
 

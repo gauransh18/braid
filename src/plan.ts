@@ -79,3 +79,65 @@ export function resolveTask(plan: PlanSpec, t: TaskSpec): ResolvedTask {
     maxTurns: t.maxTurns ?? plan.maxTurns,
   };
 }
+
+export interface ReplanDraft {
+  action?: string;
+  reason?: string;
+  tasks?: { id: string; title?: string; prompt: string; deps?: string[] }[];
+}
+
+export const MAX_REPLACEMENT_TASKS = 6;
+
+/**
+ * Turn the planner's proposal for a failed task into graph edits, or throw why it is unusable.
+ * Replacement tasks may depend only on tasks already merged or on each other; one with no deps
+ * inherits the failed task's. Whatever waited on the failed task now waits on the replacements
+ * nothing else depends on. The replacements inherit the failed task's driver, checks and limits.
+ */
+export function applyReplan(
+  plan: PlanSpec,
+  failedId: string,
+  draft: ReplanDraft,
+  doneIds: ReadonlySet<string>,
+): { added: TaskSpec[]; rewired: Record<string, string[]> } {
+  const failed = plan.tasks.find((t) => t.id === failedId);
+  if (!failed) throw new Error(`unknown task "${failedId}"`);
+  const proposed = draft.tasks ?? [];
+  if (draft.action === 'give_up' || !proposed.length) {
+    throw new Error(draft.reason ? `planner gave up: ${draft.reason}` : 'planner proposed no replacement tasks');
+  }
+  if (proposed.length > MAX_REPLACEMENT_TASKS) throw new Error(`planner proposed ${proposed.length} tasks; the limit is ${MAX_REPLACEMENT_TASKS}`);
+
+  const existing = new Set(plan.tasks.map((t) => t.id));
+  const newIds = new Set(proposed.map((t) => t.id));
+  const errors: string[] = [];
+  if (newIds.size !== proposed.length) errors.push('duplicate replacement ids');
+  for (const t of proposed) {
+    if (!ID_RE.test(t.id ?? '')) errors.push(`replacement id "${t.id}" must match ${ID_RE}`);
+    else if (existing.has(t.id)) errors.push(`replacement id "${t.id}" is already used`);
+    if (!t.prompt) errors.push(`replacement "${t.id}" has no prompt`);
+    for (const d of t.deps ?? []) {
+      if (d === t.id) errors.push(`replacement "${t.id}" depends on itself`);
+      else if (!doneIds.has(d) && !newIds.has(d)) errors.push(`replacement "${t.id}" depends on "${d}", which is neither merged nor a replacement`);
+    }
+  }
+  if (errors.length) throw new Error(`unusable replan:\n  - ${errors.join('\n  - ')}`);
+
+  const { id: _id, title: _title, prompt: _prompt, deps: _deps, ...inherited } = failed;
+  const added: TaskSpec[] = proposed.map((t) => ({
+    ...inherited,
+    id: t.id,
+    title: t.title || t.id,
+    prompt: t.prompt,
+    deps: t.deps?.length ? t.deps : failed.deps ?? [],
+  }));
+  const used = new Set(added.flatMap((t) => t.deps ?? []));
+  const sinks = added.map((t) => t.id).filter((id) => !used.has(id));
+
+  const rewired: Record<string, string[]> = {};
+  for (const t of plan.tasks) {
+    if (t.deps?.includes(failedId)) rewired[t.id] = [...t.deps.filter((d) => d !== failedId), ...sinks];
+  }
+  validatePlan({ ...plan, tasks: [...plan.tasks.map((t) => (rewired[t.id] ? { ...t, deps: rewired[t.id] } : t)), ...added] });
+  return { added, rewired };
+}

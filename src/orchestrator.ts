@@ -1,10 +1,10 @@
 import { join } from 'node:path';
 import type { DriverRegistry } from './drivers/driver.js';
 import { Git } from './git.js';
-import { READ_ONLY_TOOLS, resolveTask, validatePlan, type ResolvedTask } from './plan.js';
+import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { shell } from './proc.js';
 import { readFile } from 'node:fs/promises';
-import { conflictPrompt, extractJson, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
+import { conflictPrompt, extractJson, replanPrompt, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
 import { newRunId, RunStore, stateRoot } from './store.js';
 import type { PlanSpec, RunState, TaskState, TaskStatus } from './types.js';
 
@@ -20,7 +20,9 @@ export interface OrchestratorOptions {
   resume?: boolean;
 }
 
-const TERMINAL: TaskStatus[] = ['done', 'failed', 'blocked', 'skipped'];
+const TERMINAL: TaskStatus[] = ['done', 'failed', 'blocked', 'skipped', 'replaced'];
+/** Finished for the purposes of calling the run a success. */
+const COMPLETE: TaskStatus[] = ['done', 'replaced'];
 
 /**
  * Deterministic scheduler. The LLM does the work inside each task; code decides
@@ -40,12 +42,13 @@ export class Orchestrator {
 
   constructor(private readonly opts: OrchestratorOptions) {
     validatePlan(opts.plan);
-    this.plan = opts.plan;
+    // The run rewrites its own copy when it replans; the caller's plan object is left alone.
+    this.plan = structuredClone(opts.plan);
     if (opts.resume && !opts.runId) throw new Error('resume needs a runId');
     this.runId = opts.runId ?? newRunId();
     this.git = new Git(opts.repo);
     this.store = new RunStore(opts.repo, this.runId);
-    this.tasks = new Map(opts.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
+    this.tasks = new Map(this.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
   }
 
   get repo(): string {
@@ -118,7 +121,7 @@ export class Orchestrator {
     }
 
     const all = Object.values(this.state.tasks);
-    this.state.status = this.opts.signal?.aborted ? 'aborted' : all.every((t) => t.status === 'done') ? 'done' : 'failed';
+    this.state.status = this.opts.signal?.aborted ? 'aborted' : all.every((t) => COMPLETE.includes(t.status)) ? 'done' : 'failed';
     this.state.endedAt = new Date().toISOString();
     this.store.event('run_end', { status: this.state.status, costUsd: this.state.costUsd });
     await this.save();
@@ -145,7 +148,7 @@ export class Orchestrator {
     const retry: string[] = [];
     for (const id of this.tasks.keys()) {
       const t = prev.tasks[id];
-      if (t?.status === 'done') {
+      if (t?.status === 'done' || t?.status === 'replaced') {
         done.push(id);
         continue;
       }
@@ -315,14 +318,75 @@ export class Orchestrator {
         if (!this.opts.keepWorktrees) await this.git.removeWorktree(dir);
         return;
       }
-      this.setStatus(s, 'failed', {
-        endedAt: new Date().toISOString(),
-        error: feedback.at(-1)?.reason.slice(0, 4000) ?? 'no attempts made',
-      });
+      const error = feedback.at(-1)?.reason.slice(0, 4000) ?? 'no attempts made';
+      // Not "failed" yet: that would block the dependents before the planner has had its say.
+      if (this.canReplan()) {
+        this.setStatus(s, 'replanning', { error });
+        if (await this.replan(task, dir, feedback)) return;
+      }
+      this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error });
     } catch (err) {
       this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: String(err) });
     } finally {
       await this.save();
+    }
+  }
+
+  /**
+   * A task failed for good: ask the planner to split or rewrite it so its dependents can still run.
+   * True when the task became `replaced` and the graph gained the new tasks; false leaves the caller to fail it.
+   */
+  private canReplan(): boolean {
+    return (this.state.replans ?? 0) < (this.plan.maxReplans ?? 0) && !this.opts.signal?.aborted && !this.overBudget();
+  }
+
+  private async replan(task: ResolvedTask, dir: string, feedback: Feedback[]): Promise<boolean> {
+    const s = this.state.tasks[task.id]!;
+    const used = this.state.replans ?? 0;
+    this.state.replans = used + 1;
+    const fail = (reason: string) => {
+      this.store.event('replan', { task: task.id, ok: false, reason: reason.slice(0, 500) });
+      return false;
+    };
+
+    try {
+      const others = [...this.tasks.values()]
+        .filter((t) => t.id !== task.id)
+        .map((t) => ({ id: t.id, title: t.title, status: this.state.tasks[t.id]!.status, deps: t.deps }));
+      const res = await this.opts.drivers.get(task.driver).run({
+        prompt: replanPrompt(this.plan, task, feedback, others),
+        cwd: dir,
+        model: task.model,
+        allowedTools: READ_ONLY_TOOLS,
+        canEdit: false,
+        maxTurns: 20,
+        signal: this.opts.signal,
+        onEvent: this.store.agentLog(task.id, used + 1, 'replanner'),
+      });
+      this.addCost(s, res.costUsd);
+      if (!res.ok) return fail(`planner failed: ${res.text}`);
+      const draft = extractJson<ReplanDraft>(res.text);
+      if (!draft) return fail('planner returned no JSON');
+
+      const done = new Set(Object.values(this.state.tasks).filter((t) => t.status === 'done').map((t) => t.id));
+      const { added, rewired } = applyReplan(this.plan, task.id, draft, done);
+
+      for (const [id, deps] of Object.entries(rewired)) {
+        this.plan.tasks.find((t) => t.id === id)!.deps = deps;
+        this.tasks.get(id)!.deps = deps;
+      }
+      for (const spec of added) {
+        this.plan.tasks.push(spec);
+        this.tasks.set(spec.id, resolveTask(this.plan, spec));
+        this.state.tasks[spec.id] = { id: spec.id, status: 'pending', attempts: 0, costUsd: 0, replanOf: task.id };
+      }
+      await this.store.savePlan(this.plan);
+      const ids = added.map((t) => t.id);
+      this.store.event('replan', { task: task.id, ok: true, reason: draft.reason ?? '', added: ids });
+      this.setStatus(s, 'replaced', { replacedBy: ids, endedAt: new Date().toISOString() });
+      return true;
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
     }
   }
 

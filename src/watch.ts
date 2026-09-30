@@ -8,7 +8,7 @@ import { RunStore, stateRoot } from './store.js';
 const UI_PATH = fileURLToPath(new URL('../../ui/index.html', import.meta.url));
 const RUN_ID_RE = /^[0-9]{8}-[0-9]{6}-[a-z0-9]{2,8}$/;
 const TASK_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const LOG_FILE_RE = /^(worker|resolver|reviewer)-(\d+)\.jsonl$/;
+const LOG_FILE_RE = /^(worker|resolver|reviewer|replanner)-(\d+)\.jsonl$/;
 const POLL_MS = 400;
 
 export interface WatchServer {

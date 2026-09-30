@@ -322,4 +322,100 @@ describe('orchestrator', () => {
     const s1 = await new Orchestrator({ repo, plan, drivers: drivers() }).run();
     await assert.rejects(new Orchestrator({ repo, plan, drivers: drivers(), runId: s1.runId, resume: true }).run(), /already finished/);
   });
+
+  describe('replanning', () => {
+    const isReplan = (o: DriverRunOptions) => /You are the planner for a team of coding agents\. One task failed/.test(o.prompt);
+    const plan = (maxReplans?: number): PlanSpec => ({
+      goal: 'g',
+      driver: 'mock',
+      verify: ['node check.js'],
+      maxAttempts: 1,
+      maxReplans,
+      tasks: [
+        { id: 'a', title: 'A', prompt: 'do a' },
+        { id: 'big', title: 'Big', prompt: 'do big', deps: ['a'] },
+        { id: 'last', title: 'Last', prompt: 'do last', deps: ['big'] },
+      ],
+    });
+    /** `big` always fails its check; the split halves and everything else pass. */
+    const script = (proposal: object | string) => (o: DriverRunOptions): MockStep => {
+      if (isReplan(o)) return { text: typeof proposal === 'string' ? proposal : JSON.stringify(proposal), costUsd: 0.5 };
+      const t = taskOf(o);
+      return { files: { [`${t}.txt`]: t === 'big' ? 'bad\n' : 'ok\n' } };
+    };
+    const split = { action: 'replace', reason: 'too big', tasks: [{ id: 'big-1', prompt: 'first half' }, { id: 'big-2', prompt: 'second half', deps: ['big-1'] }] };
+
+    it('splits a failed task, rewires its dependents and finishes the run', async () => {
+      const repo = await makeRepo();
+      const { state, mock } = await runPlan(repo, plan(1), script(split));
+      assert.equal(state.status, 'done');
+      assert.equal(state.tasks.big!.status, 'replaced');
+      assert.deepEqual(state.tasks.big!.replacedBy, ['big-1', 'big-2']);
+      assert.equal(state.tasks['big-1']!.replanOf, 'big');
+      assert.equal(state.tasks.last!.status, 'done');
+      assert.equal(state.replans, 1);
+      assert.equal(state.costUsd, 0.5, 'planner spend is counted');
+      // `last` must have started after both halves merged.
+      const order = mock.calls.filter((c) => !isReplan(c)).map(taskOf);
+      assert.ok(order.indexOf('last') > order.indexOf('big-2') && order.indexOf('big-2') > order.indexOf('big-1'));
+      for (const f of ['big-1.txt', 'big-2.txt', 'last.txt']) assert.ok(await show(repo, state.integrationBranch, f));
+    });
+
+    it('keeps the failed task failed and blocks dependents when replanning is off', async () => {
+      const repo = await makeRepo();
+      const { state, mock } = await runPlan(repo, plan(), script(split));
+      assert.equal(state.status, 'failed');
+      assert.equal(state.tasks.big!.status, 'failed');
+      assert.equal(state.tasks.last!.status, 'blocked');
+      assert.ok(!mock.calls.some(isReplan));
+    });
+
+    it('leaves the task failed when the planner gives up or proposes something invalid', async () => {
+      for (const proposal of [
+        { action: 'give_up', reason: 'flaky check' },
+        { action: 'replace', tasks: [{ id: 'a', prompt: 'reuses an existing id' }] },
+        { action: 'replace', tasks: [{ id: 'x', prompt: 'p', deps: ['last'] }] },
+        'not json at all',
+      ]) {
+        const repo = await makeRepo();
+        const { state } = await runPlan(repo, plan(1), script(proposal));
+        assert.equal(state.tasks.big!.status, 'failed', JSON.stringify(proposal));
+        assert.equal(state.tasks.last!.status, 'blocked');
+        assert.equal(state.status, 'failed');
+      }
+    });
+
+    it('stops after maxReplans even if replacements fail too', async () => {
+      const repo = await makeRepo();
+      const bad = { action: 'replace', tasks: [{ id: 'big-again', prompt: 'p' }] };
+      const { state, mock } = await runPlan(repo, plan(1), (o) => {
+        if (isReplan(o)) return { text: JSON.stringify(bad) };
+        return { files: { [`${taskOf(o)}.txt`]: taskOf(o).startsWith('big') ? 'bad\n' : 'ok\n' } };
+      });
+      assert.equal(mock.calls.filter(isReplan).length, 1);
+      assert.equal(state.tasks.big!.status, 'replaced');
+      assert.equal(state.tasks['big-again']!.status, 'failed');
+      assert.equal(state.tasks.last!.status, 'blocked');
+    });
+
+    it('resumes a run with a replaced task without redoing it', async () => {
+      const repo = await makeRepo();
+      // First run: the split's second half fails, so the run fails after the replacement.
+      const first = await runPlan(repo, plan(1), (o) => {
+        if (isReplan(o)) return { text: JSON.stringify(split) };
+        const t = taskOf(o);
+        return { files: { [`${t}.txt`]: t === 'big' || t === 'big-2' ? 'bad\n' : 'ok\n' } };
+      });
+      assert.equal(first.state.status, 'failed');
+      assert.equal(first.state.tasks.big!.status, 'replaced');
+
+      const mock = new MockDriver((o) => ({ files: { [`${taskOf(o)}.txt`]: 'ok\n' } }));
+      // The stored plan (with the split) is what a real resume loads.
+      const stored = JSON.parse(readFileSync(join(repo, '.braid', 'runs', first.state.runId, 'plan.json'), 'utf8')) as PlanSpec;
+      const s2 = await new Orchestrator({ repo, plan: stored, drivers: new DriverRegistry().register(mock), runId: first.state.runId, resume: true }).run();
+      assert.equal(s2.status, 'done');
+      assert.equal(s2.tasks.big!.status, 'replaced');
+      assert.deepEqual(mock.calls.map(taskOf).sort(), ['big-2', 'last']);
+    });
+  });
 });

@@ -77,6 +77,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `base` | plan | Branch to start from (default: current) |
 | `concurrency` | plan | Maximum tasks running at once (default 3) |
 | `budgetUsd` | plan | Hard spend cap for the run |
+| `maxReplans` | plan | Times the planner may split or rewrite a task that failed for good (default 0, off) |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |
 | `driver`, `model` | both | `claude` (default), `codex`, `gemini`, `mock` |
 | `verify` | both | Commands that must exit 0 |

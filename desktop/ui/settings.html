@@ -90,7 +90,7 @@
       models: [['gpt-5.6', 'GPT-5.6'], ['gpt-5.5', 'GPT-5.5'], ['gpt-5.3-codex', 'GPT-5.3 Codex'], ['gpt-5.2-codex', 'GPT-5.2 Codex']] },
     { id: 'nim', name: 'NVIDIA NIM', provider: 'NVIDIA', api: true,
       key: 'NVIDIA API key (required)',
-      keyHint: 'Create one at build.nvidia.com (it starts with nvapi-). braid runs the agent loop itself against NVIDIA\'s OpenAI-compatible API, so pick a model that supports tool calling. Tokens are always tracked; dollars only if you set prices in a BRAID_PRICES file.',
+      keyHint: 'Create one at build.nvidia.com (it starts with nvapi-). braid runs the agent loop itself against NVIDIA\'s OpenAI-compatible API, so pick a model that supports tool calling. ',
       defaultLabel: 'meta/llama-3.3-70b-instruct (default)',
       aliases: [],
       // Only a starting point until the live list loads (every time Braid starts, and on Refresh).

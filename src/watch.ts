@@ -209,7 +209,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
     const runs = await Promise.all(
       ids.map(async (id) => {
         const s = await RunStore.loadState(repo, id).catch(() => null);
-        return { runId: id, status: s?.status ?? 'starting', costUsd: s?.costUsd ?? 0, costEstimated: s?.costEstimated, createdAt: s?.createdAt };
+        return { runId: id, status: s?.status ?? 'starting', tokens: s?.tokens, createdAt: s?.createdAt };
       }),
     );
     return send(res, 200, runs.reverse());

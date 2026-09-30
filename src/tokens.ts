@@ -15,9 +15,6 @@ export function formatTokens(n: number): string {
   return `${(n / 1e6).toFixed(2)}M`;
 }
 
-/** "$0.12", or "~$0.12" when the figure is an estimate rather than what the CLI reported. */
-export const formatCost = (usd: number, estimated?: boolean): string => `${estimated ? '~' : ''}$${usd.toFixed(2)}`;
-
 /** "31.2k tok (fresh 6.4k, cached 21.4k, out 3.4k)"; "-" when the CLI reported nothing. */
 export function describeTokens(t: TokenUsage | undefined, detail = true): string {
   const total = totalTokens(t);

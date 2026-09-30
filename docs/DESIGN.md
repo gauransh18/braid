@@ -106,3 +106,7 @@ Set `BRAID_PRICES` to a JSON file to correct or add prices:
 ```
 
 The Codex usage fields (`turn.completed.usage`) follow its docs and, like the driver, are untested against a live install.
+
+## No cost in the interface
+
+braid shows token counts and no dollar amounts anywhere: the dashboard, `braid run`/`status`/`runs`, the desktop notifications and the Settings window. Starting a run no longer asks for a spend cap, and the dashboard's start and resume flows have no cap field. What remains is internal: the agent drivers still record the cost their CLI reports (or an estimate from tokens, `pricing.ts`) in `state.json`, and a plan may optionally carry `budgetUsd`, in which case the scheduler stops starting tasks once it is reached. Nothing prompts for it, so by default a run has no spending limit; tokens are the thing to watch.

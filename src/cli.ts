@@ -14,7 +14,7 @@ import { Git } from './git.js';
 import { fetchModels, isProvider, testProvider } from './models.js';
 import { randomBytes } from 'node:crypto';
 import { Orchestrator } from './orchestrator.js';
-import { describeTokens, formatCost } from './tokens.js';
+import { describeTokens } from './tokens.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
 import { RunStore, stateRoot, type HarnessEvent } from './store.js';
@@ -25,13 +25,13 @@ const USAGE = `braid - headless multi-agent harness
 
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
-  braid run <plan.json> [--concurrency N] [--budget USD] [--replan N] [--sandbox IMAGE] [--keep-worktrees] [--watch]
-  braid resume [runId] [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
+  braid run <plan.json> [--concurrency N] [--replan N] [--sandbox IMAGE] [--keep-worktrees] [--watch]
+  braid resume [runId] [--concurrency N] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777] [--control]
                                  live dashboard for this repo's runs; --control adds start/stop/resume
                                  buttons, guarded by a per-session token (BRAID_CONTROL_TOKEN or generated)
-  braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
+  braid demo  [--port 4777]      scripted mock run + dashboard, no agents
   braid models <provider> [--json]     live model list (claude|codex|gemini|nim); key from the environment
   braid test-provider <provider> [--model M] [--json]
                                  check a provider's key, reachability and model
@@ -98,7 +98,7 @@ function printEvent(e: HarnessEvent): void {
       console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
       break;
     case 'run_end':
-      console.log(`${t} run ${e.status}; ${describeTokens(e.tokens as never, false)}, ${formatCost(Number(e.costUsd), e.costEstimated as boolean | undefined)}`);
+      console.log(`${t} run ${e.status}; ${describeTokens(e.tokens as never, false)}`);
       break;
   }
 }
@@ -106,10 +106,9 @@ function printEvent(e: HarnessEvent): void {
 function printState(s: RunState): void {
   console.log(`run ${s.runId}: ${s.status}  base=${s.base}  integration=${s.integrationBranch}`);
   console.log(`  tokens: ${describeTokens(s.tokens)}`);
-  console.log(`  spend:  ${formatCost(s.costUsd, s.costEstimated)}${s.costEstimated ? '  (estimated from tokens at list prices)' : ''}`);
   for (const t of Object.values(s.tasks)) {
     const err = t.error ? `  ${t.error.split('\n')[0]!.slice(0, 120)}` : '';
-    console.log(`  ${t.id.padEnd(24)} ${t.status.padEnd(10)} attempts=${t.attempts} ${describeTokens(t.tokens, false).padEnd(10)} ${formatCost(t.costUsd, s.costEstimated)}${err}`);
+    console.log(`  ${t.id.padEnd(24)} ${t.status.padEnd(10)} attempts=${t.attempts} ${describeTokens(t.tokens, false)}${err}`);
   }
 }
 
@@ -192,7 +191,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
 
   if (cmd === 'plan') {
     if (!arg) throw new Error('plan needs a goal');
-    const { plan, costUsd } = await planGoal(registry().get(values.driver ?? 'claude'), {
+    const { plan } = await planGoal(registry().get(values.driver ?? 'claude'), {
       repo,
       goal: arg,
       verify: values.verify,
@@ -201,7 +200,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     const json = JSON.stringify(plan, null, 2);
     if (values.out) {
       await writeFile(values.out, json + '\n');
-      console.error(`wrote ${values.out} (${plan.tasks.length} tasks, planner spend $${costUsd.toFixed(2)}). Edit it, then: braid run ${values.out}`);
+      console.error(`wrote ${values.out} (${plan.tasks.length} tasks). Edit it, then: braid run ${values.out}`);
     } else console.log(json);
     return 0;
   }
@@ -255,7 +254,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
   if (cmd === 'runs') {
     for (const id of await RunStore.listRuns(repo)) {
       const s = await RunStore.loadState(repo, id).catch(() => null);
-      console.log(`${id}  ${s?.status ?? 'unknown'}  ${describeTokens(s?.tokens, false)}  ${formatCost(s?.costUsd ?? 0, s?.costEstimated)}`);
+      console.log(`${id}  ${s?.status ?? 'unknown'}  ${describeTokens(s?.tokens, false)}`);
     }
     return 0;
   }

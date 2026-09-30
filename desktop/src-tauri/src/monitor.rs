@@ -14,8 +14,6 @@ pub struct RunSnap {
     pub done: usize,
     pub total: usize,
     pub blocked: usize,
-    pub cost: f64,
-    pub estimated: bool,
     /// Still being driven by a live process. A "running" state left by a crash is not active.
     pub active: bool,
 }
@@ -41,11 +39,7 @@ pub fn parse_state(text: &str, alive: impl Fn(u32) -> bool) -> Option<RunSnap> {
     let v: Value = serde_json::from_str(text).ok()?;
     let status = v.get("status")?.as_str()?.to_string();
     let tasks = v.get("tasks").and_then(Value::as_object);
-    let mut snap = RunSnap {
-        cost: v.get("costUsd").and_then(Value::as_f64).unwrap_or(0.0),
-        estimated: v.get("costEstimated").and_then(Value::as_bool).unwrap_or(false),
-        ..RunSnap::default()
-    };
+    let mut snap = RunSnap::default();
     for (id, t) in tasks.into_iter().flatten() {
         snap.total += 1;
         match t.get("status").and_then(Value::as_str).unwrap_or("") {
@@ -86,10 +80,6 @@ pub fn active_count(runs: &HashMap<String, RunSnap>) -> usize {
     runs.values().filter(|r| r.active).count()
 }
 
-fn money(cost: f64, estimated: bool) -> String {
-    format!("{}${cost:.2}", if estimated { "~" } else { "" })
-}
-
 /// Notifications for what changed between two looks. Runs already finished at the first look never notify.
 pub fn diff(repo_name: &str, prev: &HashMap<String, RunSnap>, next: &HashMap<String, RunSnap>) -> Vec<Note> {
     let mut notes = Vec::new();
@@ -109,11 +99,10 @@ pub fn diff(repo_name: &str, prev: &HashMap<String, RunSnap>, next: &HashMap<Str
                 }
             }
         } else if was_running && (before.is_some() || now.status != "running") {
-            let cost = money(now.cost, now.estimated);
             let body = match now.status.as_str() {
-                "done" => format!("Run finished: {}/{} tasks merged, {cost}", now.done, now.total),
-                "aborted" => format!("Run stopped: {}/{} tasks merged, {cost}", now.done, now.total),
-                _ => format!("Run failed: {} failed, {} blocked, {}/{} merged, {cost}", now.failed.len(), now.blocked, now.done, now.total),
+                "done" => format!("Run finished: {}/{} tasks merged", now.done, now.total),
+                "aborted" => format!("Run stopped: {}/{} tasks merged", now.done, now.total),
+                _ => format!("Run failed: {} failed, {} blocked, {}/{} merged", now.failed.len(), now.blocked, now.done, now.total),
             };
             notes.push(Note { title, body });
         }
@@ -130,7 +119,7 @@ mod tests {
             .iter()
             .map(|(id, st, err)| ((*id).to_string(), serde_json::json!({"id": id, "status": st, "error": err})))
             .collect();
-        serde_json::json!({"status": status, "costUsd": 0.42, "pid": pid, "tasks": t}).to_string()
+        serde_json::json!({"status": status, "pid": pid, "tasks": t}).to_string()
     }
     fn snap(text: &str) -> RunSnap {
         parse_state(text, |_| true).unwrap()
@@ -161,7 +150,7 @@ mod tests {
         let before = map(vec![("r1", running.clone())]);
         let notes = diff("repo", &before, &map(vec![("r1", done.clone())]));
         assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].body, "Run finished: 1/1 tasks merged, $0.42");
+        assert_eq!(notes[0].body, "Run finished: 1/1 tasks merged");
         assert_eq!(notes[0].title, "braid - repo");
         // Still running, or already finished at the first look: silence.
         assert!(diff("repo", &before, &before).is_empty());
@@ -173,7 +162,7 @@ mod tests {
         let failed = snap(&state("failed", &[("a", "failed", "Verification failed."), ("b", "blocked", "")], Some(1)));
         let notes = diff("repo", &HashMap::new(), &map(vec![("new", failed)]));
         assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].body, "Run failed: 1 failed, 1 blocked, 0/2 merged, $0.42");
+        assert_eq!(notes[0].body, "Run failed: 1 failed, 1 blocked, 0/2 merged");
     }
 
     #[test]
@@ -184,14 +173,6 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].body, "Task a failed: Reviewer requested changes");
         assert!(diff("repo", &map(vec![("r", bad.clone())]), &map(vec![("r", bad)])).is_empty(), "already reported");
-    }
-
-    #[test]
-    fn estimated_cost_is_marked() {
-        let mut s = snap(&state("done", &[("a", "done", "")], Some(1)));
-        s.estimated = true;
-        let notes = diff("repo", &map(vec![("r", RunSnap { status: "running".into(), ..RunSnap::default() })]), &map(vec![("r", s)]));
-        assert!(notes[0].body.ends_with("~$0.42"));
     }
 
     #[test]

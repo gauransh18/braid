@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
-import { addTokens, describeTokens, formatCost, formatTokens } from '../src/tokens.js';
+import { addTokens, describeTokens, formatTokens } from '../src/tokens.js';
 import { ClaudeDriver, claudeTokens, parseClaudeLine } from '../src/drivers/claude.js';
 import { estimateCostUsd, priceFor } from '../src/pricing.js';
 import { checkTools, doctorExitCode, formatDoctor } from '../src/doctor.js';
@@ -141,12 +141,10 @@ describe('tokens', () => {
     assert.deepEqual((r as { tokens?: unknown }).tokens, { input: 10, cached: 90, output: 5 });
   });
 
-  it('formats counts and marks estimated dollars', () => {
+  it('formats token counts', () => {
     assert.equal(formatTokens(950), '950');
     assert.equal(formatTokens(12_340), '12.3k');
     assert.equal(formatTokens(4_560_000), '4.56M');
-    assert.equal(formatCost(0.1234, true), '~$0.12');
-    assert.equal(formatCost(0.1234), '$0.12');
     assert.equal(describeTokens({ input: 1000, cached: 2000, output: 500 }), '3.5k tok (fresh 1k, cached 2k, out 500)');
     assert.equal(describeTokens(undefined), '-');
     assert.deepEqual(addTokens({ input: 1, cached: 2, output: 3 }, undefined), { input: 1, cached: 2, output: 3 });

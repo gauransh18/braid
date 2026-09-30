@@ -170,15 +170,11 @@ export class RunManager {
     return out;
   }
 
-  /** Every run started from a window must have a spend cap: nobody is watching a terminal to press Ctrl-C. */
   private checkPlan(plan: PlanSpec): void {
     try {
       validatePlan(plan);
     } catch (err) {
       throw new HttpError(400, (err as Error).message);
-    }
-    if (typeof plan.budgetUsd !== 'number' || !(plan.budgetUsd > 0)) {
-      throw new HttpError(400, 'set budgetUsd (a spend cap in dollars) before starting a run from here');
     }
   }
 

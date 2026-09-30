@@ -32,7 +32,7 @@ them to a release, with a `SHA256SUMS` file (`.github/workflows/release.yml`). g
 braid plan "add rate limiting to the API" --verify "npm test" --out plans/rate-limit.json
 
 # 2. Run it
-braid run plans/rate-limit.json --budget 5
+braid run plans/rate-limit.json
 
 # 3. Inspect and merge
 braid status
@@ -45,7 +45,7 @@ Press Ctrl-C to stop the agents. Work already merged stays on the integration br
 To continue an interrupted or failed run, keep the merged work and retry the rest:
 
 ```bash
-braid resume [runId] --budget 10   # defaults to the newest unfinished run
+braid resume [runId]   # defaults to the newest unfinished run
 ```
 
 ## Desktop app (macOS)
@@ -69,23 +69,23 @@ start them with `braid run` and the window shows them live.
 ```bash
 braid run plans/rate-limit.json --watch   # run + dashboard
 braid watch                               # dashboard for this repo's runs (any terminal)
-braid demo                                # scripted mock run, no agents, no spend
+braid demo                                # scripted mock run, no agents
 ```
 
 The dashboard opens at `http://127.0.0.1:4777`. It only listens on this machine and is read-only by default.
 
 `braid watch --control` (and the desktop app) turns an empty repository into a guided start: describe a goal, and braid
 drafts a plan you can review and edit (tasks, dependencies, the command every task must pass, pre-filled from your
-`package.json`, `Cargo.toml`, `go.mod` or pytest config), set a spend cap, and start it. It also shows which agents are available as clickable chips: click one to switch that agent off or on (saved in Settings, and applied in every open window). Later runs use the **New run** button (same steps), plus **Stop** and **Resume**. You can also load a saved plan
+`package.json`, `Cargo.toml`, `go.mod` or pytest config), and start it. It also shows which agents are available as clickable chips: click one to switch that agent off or on (saved in Settings, and applied in every open window). Later runs use the **New run** button (same steps), plus **Stop** and **Resume**. You can also load a saved plan
 from `plans/`. One run is active at a time. These endpoints can
 start agents, so they need a per-session token (from `BRAID_CONTROL_TOKEN`, or generated and printed as `#token=...`
 after the URL; it never travels in argv or the request URL), they refuse requests from other origins, and a run started
-this way must have a `budgetUsd`. Reading runs and transcripts does not need the token.
+Reading runs and transcripts does not need the token.
 It shows:
 
 - **The floor:** each agent is a pixel blob at a desk. Its mood follows its task: asleep while pending, typing while running, a magnifier while verifying, glasses while reviewing, jumping while merging, happy when done, flattened when failed, tied up when blocked. The lines between desks are dependencies.
 - **The braid:** the integration branch drawn as a rope that gains a strand in the task's color on every verified merge.
-- **Usage:** tokens (fresh, cached, output) and spend per task and per run. Dollars show as `~$` when they are estimated from tokens (Codex, Gemini) rather than reported.
+- **Usage:** token counts (fresh, cached, output) per task and per run. braid shows no dollar amounts.
 - **Activity:** every harness event (verify results, review verdicts, conflicts, rollbacks).
 - **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
 - **Knot:** the mascot, which narrates what the run is doing.
@@ -99,7 +99,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `goal` | plan | Shared context given to every agent |
 | `base` | plan | Branch to start from (default: current) |
 | `concurrency` | plan | Maximum tasks running at once (default 3) |
-| `budgetUsd` | plan | Hard spend cap for the run |
+| `budgetUsd` | plan | Optional, advanced: stop scheduling once this much has been spent. Nothing in the app or CLI asks for it or shows cost |
 | `maxReplans` | plan | Times the planner may split or rewrite a task that failed for good (default 0, off) |
 | `sandbox` | plan | Run setup, verify and optionally the agent in a Docker/Podman container. See [Sandbox](#sandbox) |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |

@@ -314,7 +314,7 @@ svg.threads path.dim { opacity: .18; }
     <button class="btn danger" id="stopBtn" hidden>Stop</button>
     <button class="btn" id="resumeBtn" hidden>Resume</button>
     <div class="stat"><span class="k">Merged</span><span class="v" id="progressV">-</span><div class="meter"><i id="progressM"></i></div></div>
-    <div class="stat"><span class="k">Spend</span><span class="v" id="spendV">-</span><span class="sub mono" id="tokV" title=""></span><div class="meter" id="spendMeter"><i id="spendM"></i></div></div>
+    <div class="stat"><span class="k">Tokens</span><span class="v" id="spendV">-</span></div>
     <div class="stat"><span class="k">Elapsed</span><span class="v" id="elapsedV">-</span></div>
     <button class="icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle theme">&#9680;</button>
   </div>
@@ -350,10 +350,6 @@ svg.threads path.dim { opacity: .18; }
         <div data-f="summary"></div>
         <p class="note" data-f="agentLine"></p>
         <details data-f="jsonBox"><summary>Edit the plan as JSON</summary><textarea class="code" data-f="json" spellcheck="false"></textarea></details>
-        <div class="row">
-          <label style="flex:0 0 200px">Spend cap (USD)<input type="number" min="0.01" step="0.5" value="5" data-f="budget"></label>
-          <p class="note" style="flex:1 1 220px">The run stops on its own once it has spent this much.</p>
-        </div>
         <div class="err" data-f="err-review" role="alert"></div>
         <div class="actions"><button type="button" class="btn" data-a="back">Back</button><button type="button" class="btn primary" data-a="start">Start run</button></div>
       </div>
@@ -366,8 +362,7 @@ svg.threads path.dim { opacity: .18; }
 <dialog class="sheet" id="resumeDlg" aria-labelledby="rsTitle">
   <form method="dialog">
     <h3 class="pixel" id="rsTitle">Resume run</h3>
-    <div class="note">Merged tasks are kept. Everything else is retried. Spend so far counts toward the cap.</div>
-    <label>Spend cap (USD)<input id="rsBudget" type="number" min="0.01" step="0.5" value="5"></label>
+    <div class="note">Merged tasks are kept. Everything else is retried.</div>
     <div class="error" id="rsError" role="alert"></div>
     <div class="actions"><button type="button" class="btn" id="rsCancel">Cancel</button><button type="button" class="btn primary" id="rsGo">Resume</button></div>
   </form>
@@ -521,7 +516,6 @@ const $ = (id) => document.getElementById(id);
 /* Tokens are what the agent CLI reported. Dollars are exact for Claude and a list-price estimate (~) for Codex and Gemini. */
 const tokTotal = (t) => t ? (t.input || 0) + (t.cached || 0) + (t.output || 0) : 0;
 const fmtTok = (n) => n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 2 : 1).replace(/\.?0+$/, '') + 'k' : (n / 1e6).toFixed(2) + 'M';
-const fmtUsd = (usd, est) => (est ? '~' : '') + '$' + (usd || 0).toFixed(2);
 const tokLine = (t) => tokTotal(t) ? `${fmtTok(tokTotal(t))} tok` : '-';
 const tokDetail = (t) => tokTotal(t) ? `${fmtTok(t.input)} fresh, ${fmtTok(t.cached)} cached, ${fmtTok(t.output)} out` : 'no token data';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -555,7 +549,7 @@ async function loadRuns() {
 function fmtRunLabel(r) {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(r.runId);
   const when = m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : r.runId;
-  return `${when} - ${r.status} - ${fmtUsd(r.costUsd, r.costEstimated)}`;
+  return `${when} - ${r.status}${tokTotal(r.tokens) ? ' - ' + tokLine(r.tokens) : ''}`;
 }
 
 async function openRun(id) {
@@ -677,12 +671,8 @@ function renderHeader() {
   $('progressV').textContent = tasks.length ? `${done} / ${tasks.length}` : '-';
   $('progressM').style.width = tasks.length ? (100 * done / tasks.length) + '%' : '0';
   $('progressM').style.background = 'var(--ok)';
-  const spend = st?.costUsd || 0, budget = S.plan?.budgetUsd;
-  $('spendV').textContent = budget ? `${fmtUsd(spend, st?.costEstimated)} / $${budget}` : fmtUsd(spend, st?.costEstimated);
-  $('tokV').textContent = tokLine(st?.tokens);
-  $('tokV').title = tokDetail(st?.tokens) + (st?.costEstimated ? '. Dollars are estimated from tokens at list prices.' : '');
-  $('spendM').style.width = budget ? Math.min(100, 100 * spend / budget) + '%' : '0';
-  $('spendMeter').classList.toggle('hot', !!budget && spend / budget > .8);
+  $('spendV').textContent = tokLine(st?.tokens);
+  $('spendV').title = tokDetail(st?.tokens);
   $('bubble').textContent = knotSays();
 }
 
@@ -742,7 +732,7 @@ function updateFloor() {
   for (const t of tasks) {
     const el = $('desk-' + t.id);
     if (!el) continue;
-    const s = S.state.tasks[t.id] || { status: 'pending', attempts: 0, costUsd: 0 };
+    const s = S.state.tasks[t.id] || { status: 'pending', attempts: 0 };
     const chip = el.querySelector('[data-chip]');
     chip.className = 'chip ' + s.status;
     chip.textContent = s.status;
@@ -754,7 +744,7 @@ function updateFloor() {
     }).join('');
     el.querySelector('[data-dots]').title = `attempt ${s.attempts} of ${max}`;
     const costEl = el.querySelector('[data-cost]');
-    costEl.textContent = (tokTotal(s.tokens) ? tokLine(s.tokens) + ' · ' : '') + fmtUsd(s.costUsd, S.state.costEstimated);
+    costEl.textContent = tokTotal(s.tokens) ? tokLine(s.tokens) : '';
     costEl.title = tokDetail(s.tokens);
     el.classList.toggle('sel', S.selected === t.id);
     el.setAttribute('aria-label', `${t.title || t.id}: ${s.status}, attempt ${s.attempts} of ${max}`);
@@ -848,7 +838,7 @@ function renderBraid() {
 
 const EV_TEXT = {
   run_start: (e) => [`Run started from ${e.base}`, ''],
-  run_end: (e) => [`Run ${e.status}, ${tokTotal(e.tokens) ? tokLine(e.tokens) + ', ' : ''}${fmtUsd(Number(e.costUsd || 0), e.costEstimated)} spent`, e.status === 'done' ? 'ok' : 'err'],
+  run_end: (e) => [`Run ${e.status}${tokTotal(e.tokens) ? ', ' + tokLine(e.tokens) : ''}`, e.status === 'done' ? 'ok' : 'err'],
   task_status: (e) => [`${e.status}${e.error ? ': ' + String(e.error).split('\n')[0].slice(0, 90) : ''}`, e.status === 'done' ? 'ok' : e.status === 'failed' ? 'err' : ''],
   verify: (e) => [`verify ${e.dir}: ${e.cmd} ${e.code === 0 ? 'passed' : 'failed (' + e.code + ')'}`, e.code === 0 ? '' : 'err'],
   review: (e) => [e.approve ? 'review approved' : `review: ${(e.issues || []).join('; ').slice(0, 120)}`, e.approve ? 'ok' : 'err'],
@@ -916,7 +906,7 @@ function renderInspector(full) {
   const s = S.state.tasks[id] || {};
   $('insTitle').textContent = t.title || id;
   $('insMeta').innerHTML = `<span class="chip ${s.status}">${esc(s.status)}</span>
-    <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono" title="${esc(tokDetail(s.tokens))}">${esc(tokLine(s.tokens))} · ${fmtUsd(s.costUsd, S.state?.costEstimated)}</span>
+    <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono" title="${esc(tokDetail(s.tokens))}">${esc(tokLine(s.tokens))}</span>
     ${(t.deps || []).length ? `<span>needs ${t.deps.map(d => `<b style="color:${colorOf(d)}">${esc(d)}</b>`).join(', ')}</span>` : ''}`;
   if (full || !$('insChecks')) {
     $('insBody').innerHTML = `
@@ -949,7 +939,7 @@ function renderLogs() {
       case 'text': return `<div class="msg">${esc(e.text)}</div>`;
       case 'tool': return `<div class="tool"><b>${esc(e.name)}</b><code class="mono">${esc(summarizeInput(e.input))}</code></div>`;
       case 'tool_result': return `<div class="res mono ${e.isError ? 'bad' : ''}">${esc(e.preview)}</div>`;
-      case 'result': return `<div class="result ${e.ok ? 'ok' : 'bad'}"><b>${e.ok ? 'Finished' : 'Ended with error'}</b>${e.costUsd || tokTotal(e.tokens) ? ` - ${tokTotal(e.tokens) ? tokLine(e.tokens) + ', ' : ''}${fmtUsd(Number(e.costUsd), e.costEstimated)}` : ''}\n${esc(String(e.text || '').slice(0, 1200))}</div>`;
+      case 'result': return `<div class="result ${e.ok ? 'ok' : 'bad'}"><b>${e.ok ? 'Finished' : 'Ended with error'}</b>${tokTotal(e.tokens) ? ` - ${tokLine(e.tokens)}` : ''}\n${esc(String(e.text || '').slice(0, 1200))}</div>`;
       default: return '';
     }
   }).join('');
@@ -1046,7 +1036,6 @@ function mountComposer(host, onStarted) {
       `<div class="p">${esc2(String(t.prompt || '').slice(0, 220))}${String(t.prompt || '').length > 220 ? '...' : ''}</div>` +
       `${t.deps?.length ? `<div class="d">runs after: ${t.deps.map(esc2).join(', ')}</div>` : ''}</li>`).join('')}</ol>`;
     f('json').value = JSON.stringify(plan, null, 2);
-    if (plan.budgetUsd) f('budget').value = plan.budgetUsd;
     const agent = plan.driver || defaults.driver || 'claude';
     const model = plan.model || defaults.models?.[agent];
     f('agentLine').innerHTML = `Agent: <b style="color:var(--text)">${esc2(agent)}</b> &middot; model: <b style="color:var(--text)">${esc2(model || 'the CLI\'s default')}</b>. Change these in the Braid menu, under Settings (Cmd+,), or in the plan JSON below.`;
@@ -1087,12 +1076,12 @@ function mountComposer(host, onStarted) {
     if (!goal) { say('goal', 'Describe what you want done first.'); f('goal').focus(); return; }
     const btn = act('draft');
     btn.disabled = true; btn.textContent = 'Drafting...';
-    say('goal', 'The planner is reading your repository. This takes a little while and costs a few cents.', true);
+    say('goal', 'The planner is reading your repository. This takes a little while.', true);
     try {
       const verify = f('verify').value.trim();
       const res = await api('POST', '/api/plan-draft', { goal, verify: verify ? [verify] : [] });
       review(res.plan);
-      say('review', `Drafted (planner spend ${fmtUsd(res.costUsd)}). Change anything you like before starting.`, true);
+      say('review', 'Drafted. Change anything you like before starting.', true);
     } catch (err) { say('goal', err.message); }
     finally { btn.disabled = false; btn.textContent = 'Draft a plan'; }
   });
@@ -1111,7 +1100,6 @@ function mountComposer(host, onStarted) {
   act('start').addEventListener('click', async () => {
     let toRun;
     try { toRun = JSON.parse(f('json').value); } catch { say('review', 'The plan JSON is not valid. Fix it, or reload the plan by going Back.'); return; }
-    toRun.budgetUsd = Number(f('budget').value);
     const btn = act('start'); btn.disabled = true; btn.textContent = 'Starting...';
     try {
       const { runId } = await api('POST', '/api/runs', { plan: toRun });
@@ -1140,14 +1128,13 @@ $('stopBtn').addEventListener('click', async () => {
 });
 $('resumeBtn').addEventListener('click', () => {
   $('rsError').textContent = '';
-  $('rsBudget').value = Math.max(5, Math.ceil((S.state?.costUsd || 0) + 3));
   $('resumeDlg').showModal();
 });
 $('rsCancel').addEventListener('click', () => $('resumeDlg').close());
 $('rsGo').addEventListener('click', async () => {
   $('rsGo').disabled = true;
   try {
-    await api('POST', `/api/run/${S.runId}/resume`, { budgetUsd: Number($('rsBudget').value) });
+    await api('POST', `/api/run/${S.runId}/resume`, {});
     $('resumeDlg').close();
     pollControl();
   } catch (err) { $('rsError').textContent = err.message; }

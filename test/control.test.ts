@@ -142,11 +142,13 @@ describe('control endpoints', () => {
     assert.equal(bad, 415);
   });
 
-  it('demands a valid plan with a spend cap', async () => {
-    assert.equal((await authed(server, 'POST', '/api/runs', { plan: plan({ budgetUsd: undefined }) })).status, 400);
-    assert.match((await authed(server, 'POST', '/api/runs', { plan: plan({ budgetUsd: undefined }) })).json.error, /budgetUsd/);
-    assert.equal((await authed(server, 'POST', '/api/runs', { plan: { goal: 'g', budgetUsd: 1, tasks: [] } })).status, 400);
+  it('demands a valid plan, but asks for no spend cap', async () => {
+    assert.equal((await authed(server, 'POST', '/api/runs', { plan: { goal: 'g', tasks: [] } })).status, 400);
     assert.equal((await authed(server, 'POST', '/api/runs', {})).status, 400);
+    // A plan with no budgetUsd is fine: nothing asks for one.
+    const res = await authed(server, 'POST', '/api/runs', { plan: plan({ budgetUsd: undefined }) });
+    assert.equal(res.status, 202);
+    await finished(res.json.runId);
   });
 
   it('starts a run that finishes, and lists it', async () => {

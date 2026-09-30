@@ -94,7 +94,7 @@ after the URL; it never travels in argv or the request URL), they refuse request
 Reading runs and transcripts does not need the token.
 It shows:
 
-- **The floor:** each agent is a pixel blob at a desk. Its mood follows its task: asleep while pending, typing while running, a magnifier while verifying, glasses while reviewing, jumping while merging, happy when done, flattened when failed, tied up when blocked. The lines between desks are dependencies.
+- **The floor:** each agent is a pixel blob that **knits a strand of wool** in its task's colour, and its mood shows what it is doing: a ball of wool waiting beside it, needles clicking over a growing swatch while it works, a magnifier while its stitches are checked (your tests), glasses while a reviewer looks, jumping while it ties the strand into the braid, a fringed swatch when done, tangled wool when failed, wrapped in its own wool when blocked. Under each name a plain sentence says what it is doing or what it is waiting for, columns are numbered steps, and dependencies are strands of wool that thin out until the first agent finishes, turn solid when it has, and twist through while the next agent works.
 - **The braid:** the integration branch drawn as a rope that gains a strand in the task's color on every verified merge.
 - **Usage:** token counts (fresh, cached, output) per task and per run. braid shows no dollar amounts.
 - **Activity:** every harness event (verify results, review verdicts, conflicts, rollbacks).

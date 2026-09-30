@@ -70,7 +70,7 @@ button { font: inherit; color: inherit; }
   backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand canvas { width: 60px; height: 60px; margin: -6px -4px -8px -8px; }
+.brand canvas { width: 72px; height: 72px; margin: -8px -6px -10px -10px; }
 .wordmark { font-size: 26px; font-weight: 700; line-height: 1; }
 .wordmark small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 3px; }
 .bubble {
@@ -153,7 +153,7 @@ body.start-mode .run-meta > :not(#themeBtn), body.start-mode #bubble { display: 
 .tasks .d { font-size: 11px; color: var(--faint); margin-top: 4px; }
 .composer details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .empty.start { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 34px 20px 50px; }
-.empty.start canvas { width: 72px; height: 72px; }
+.empty.start canvas { width: 86px; height: 86px; }
 dialog.sheet {
   border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(680px, 94vw); box-shadow: var(--shadow);
 }
@@ -189,21 +189,41 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
 .col { display: flex; flex-direction: column; gap: 16px; width: 220px; flex: none; }
 .col-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: -6px; }
 svg.threads { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-svg.threads path { fill: none; stroke-width: 3; stroke-linecap: round; opacity: .55; }
-svg.threads path.live { stroke-dasharray: 2 7; animation: flow .7s linear infinite; opacity: .95; }
-svg.threads path.dim { opacity: .18; }
-@keyframes flow { to { stroke-dashoffset: -9; } }
+svg.threads path { fill: none; stroke-linecap: round; }
+/* wool: a solid strand in the task's colour with a lighter twist laid over it */
+svg.threads .wool { stroke-width: 5; }
+svg.threads .twist { stroke: rgba(255, 255, 255, .55); stroke-width: 5; stroke-dasharray: 2 6; stroke-linecap: butt; }
+svg.threads .strand.unspun .wool { stroke-width: 2.5; opacity: .28; stroke-dasharray: 1 7; }
+svg.threads .strand.unspun .twist { display: none; }
+svg.threads .strand.ready .wool, svg.threads .strand.ready .twist { opacity: .95; }
+svg.threads .strand.spent .wool, svg.threads .strand.spent .twist { opacity: .5; }
+svg.threads .strand.feeding .wool { opacity: 1; }
+svg.threads .strand.feeding .twist { animation: flow .9s linear infinite; }
+svg.threads .strand.snapped .wool { opacity: .22; stroke-dasharray: 3 9; }
+svg.threads .strand.snapped .twist { display: none; }
+svg.threads .knot { fill: var(--c); stroke: rgba(0, 0, 0, .35); stroke-width: 1.5; }
+svg.threads .knot.unspun, svg.threads .knot.snapped { fill: var(--panel); stroke: var(--c); opacity: .5; }
+svg.threads .spool { fill: var(--c); stroke: rgba(0, 0, 0, .3); stroke-width: 1.5; }
+@keyframes flow { to { stroke-dashoffset: -8; } }
+@media (prefers-reduced-motion: reduce) { svg.threads .strand.feeding .twist { animation: none; } }
 
 .desk {
-  position: relative; z-index: 1; display: grid; grid-template-columns: 56px 1fr; gap: 4px 10px; align-items: center;
+  position: relative; z-index: 1; display: grid; grid-template-columns: 80px 1fr; gap: 3px 10px; align-items: center;
   width: 100%; text-align: left; padding: 10px 12px 10px 8px; border-radius: 12px; cursor: pointer;
   background: var(--panel-2); border: 2px solid var(--line); transition: transform .15s, border-color .15s, background .15s;
 }
 .desk:hover { transform: translateY(-2px); border-color: var(--line-2); }
 .desk.sel { border-color: var(--tc); background: color-mix(in srgb, var(--tc) 10%, var(--panel-2)); }
-.desk canvas { width: 56px; height: 56px; grid-row: span 3; }
+.desk canvas { width: 80px; height: 80px; grid-row: span 4; }
 .desk .t { font-weight: 600; font-size: 13.5px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desk .id { font-size: 12px; color: var(--muted); }
+.desk .id { font-size: 11px; color: var(--faint); font-weight: 400; }
+.desk .cap { font-size: 12px; color: var(--muted); line-height: 1.3; min-height: 1.3em; }
+.desk .cap.running, .desk .cap.resolving, .desk .cap.verifying, .desk .cap.reviewing, .desk .cap.merging { color: var(--info); }
+.desk .cap.done { color: var(--ok); }
+.desk .cap.failed, .desk .cap.replanning { color: var(--err); }
+.desk .cap.blocked { color: var(--warn); }
+.howto { padding: 2px 16px 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; max-width: 760px; }
+.howto b { color: var(--text); font-weight: 600; }
 .desk .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); }
 .desk::after {
   content: ""; position: absolute; left: -2px; top: 12px; bottom: 12px; width: 4px; border-radius: 0 3px 3px 0; background: var(--tc);
@@ -254,7 +274,7 @@ svg.threads path.dim { opacity: .18; }
 }
 .inspector.open { transform: none; }
 .ins-h { display: grid; grid-template-columns: 84px 1fr auto; gap: 12px; align-items: center; padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
-.ins-h canvas { width: 84px; height: 84px; }
+.ins-h canvas { width: 100px; height: 100px; }
 .ins-h h3 { margin: 0 0 4px; font-size: 20px; }
 .ins-h .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
 .ins-body { flex: 1; overflow: auto; padding: 12px 16px 24px; }
@@ -281,7 +301,7 @@ svg.threads path.dim { opacity: .18; }
 
 /* ---------- empty ---------- */
 .empty { display: grid; place-items: center; text-align: center; gap: 10px; padding: 70px 20px; color: var(--muted); }
-.empty canvas { width: 120px; height: 120px; }
+.empty canvas { width: 144px; height: 144px; }
 .empty code { background: var(--panel-2); padding: 3px 8px; border-radius: 6px; color: var(--text); }
 
 @media (max-width: 900px) {
@@ -302,7 +322,7 @@ svg.threads path.dim { opacity: .18; }
 <body>
 <header class="top">
   <div class="brand">
-    <canvas class="sprite" id="knot" width="20" height="20" aria-hidden="true"></canvas>
+    <canvas class="sprite" id="knot" width="24" height="24" aria-hidden="true"></canvas>
     <div class="wordmark pixel">braid<small>watch</small></div>
   </div>
   <div class="bubble" id="bubble" aria-live="polite">Loading the loom...</div>
@@ -371,7 +391,7 @@ svg.threads path.dim { opacity: .18; }
 <div class="scrim" id="scrim"></div>
 <aside class="inspector" id="inspector" aria-label="Task details" aria-hidden="true">
   <div class="ins-h">
-    <canvas class="sprite" id="insSprite" width="20" height="20" aria-hidden="true"></canvas>
+    <canvas class="sprite" id="insSprite" width="24" height="24" aria-hidden="true"></canvas>
     <div><h3 class="pixel" id="insTitle"></h3><div class="meta" id="insMeta"></div></div>
     <button class="close" id="insClose" aria-label="Close">&times;</button>
   </div>
@@ -394,13 +414,36 @@ function mix(h, target, amt) {
 }
 function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
 
+/** A ball of wool in the task's colour, bottom-left. `roll` turns the wrapped strands so it looks like it is unwinding. */
+function drawYarnBall(px, yarn, roll) {
+  const dark = mix(yarn, 'black', .4), light = mix(yarn, 'white', .5), cx = 1.5, cy = 18.5, r = 2.7;
+  for (let y = 15; y <= 22; y++) for (let x = -2; x <= 5; x++) {
+    const d = Math.hypot(x + .5 - cx, y + .5 - cy);
+    if (d > r) continue;
+    px(x, y, d > r - 1 ? dark : ((x + y + roll) % 3 === 0 ? light : yarn));
+  }
+}
+
+/** A little knitted swatch hanging in front of the agent: rows of stitches in two tones. `f` slides the pattern while it is being worked. */
+function drawSwatch(px, yarn, y0, rows, f, x0 = 7, x1 = 12) {
+  const light = mix(yarn, 'white', .45), dark = mix(yarn, 'black', .25);
+  for (let r = 0; r < rows; r++) {
+    const from = r === rows - 1 && rows > 2 ? x0 + 1 : x0, to = r === rows - 1 && rows > 2 ? x1 - 1 : x1;
+    for (let x = from; x <= to; x++) px(x, y0 + r, (x + r + f) % 2 ? yarn : light);
+    px(from, y0 + r, dark); px(to, y0 + r, dark);
+  }
+}
+
 /**
- * 20x20 pixel blob. Original art drawn procedurally: a round body, a braided
- * tuft on top, and a face + props that change with mood. f = animation frame.
+ * 24x24 pixel blob (20x20 body art drawn at an offset, so there is room for wool). Original art drawn procedurally:
+ * a round body, a braided tuft on top, a face, and wool props that change with mood. The wool is the task's colour,
+ * the same colour its strand has in the braid. f = animation frame.
  */
 function drawBlob(ctx, base, mood, f, tuft) {
   const ink = getComputedStyle(document.documentElement).getPropertyValue('--sprite-ink').trim() || '#12131c';
-  ctx.clearRect(0, 0, 20, 20);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(2, 2);
   const color = mood === 'ghost' ? grey(base) : base;
   ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
   const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
@@ -439,34 +482,53 @@ function drawBlob(ctx, base, mood, f, tuft) {
 
   // face
   const ey = Math.round(cy) - 1;
+  const ly = Math.round(cy) + 2; // where the hands are
   const blink = f % 26 === 0;
   const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  const yarn = color, yarnDark = mix(color, 'black', .35), yarnLight = mix(color, 'white', .5);
   switch (mood) {
     case 'sleep':
       px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
       { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
         [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      // waiting: the ball of wool sits beside it, end trailing on the floor
+      drawYarnBall(px, yarn, 0);
+      [[4, 18], [5, 19], [6, 19], [7, 18]].forEach(([x, y]) => px(x, y, yarn));
       break;
     case 'happy':
       [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
       px(9, ey + 3, ink); px(10, ey + 3, ink);
       if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      // finished: a neat swatch with a fringe, and the ball tidy beside it
+      drawSwatch(px, yarn, ly, 4, 0, 6, 13);
+      [6, 8, 11, 13].forEach((x) => px(x, ly + 4, yarn));
+      drawYarnBall(px, yarn, 0);
       break;
     case 'dead':
       [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      // tangled: the strand has knotted itself all over it
+      for (let x = 3; x <= 17; x++) px(x, 12 + ((x * 7) % 5), (x % 2 ? yarn : yarnDark));
+      for (let x = 4; x <= 16; x += 3) { px(x, 11 + (x % 4), yarnLight); px(x + 1, 17, yarnDark); }
+      drawYarnBall(px, yarn, 1);
+      [[4, 17], [6, 16], [8, 17], [9, 15]].forEach(([x, y]) => px(x, y, yarn));
       break;
     case 'tied':
       eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
-      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? '#a0703c' : '#c89452');
-      px(16, Math.round(cy) + 1, '#a0703c'); px(17, Math.round(cy) + 3, '#c89452');
+      // wrapped in its own wool: the strand it needs never arrived
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? yarnDark : yarn);
+      for (let x = 4; x < 16; x++) if (inside(x, Math.round(cy) + 4)) px(x, Math.round(cy) + 4, x % 2 ? yarn : yarnDark);
+      px(16, Math.round(cy) + 1, yarnDark); px(17, Math.round(cy) + 3, yarn);
+      drawYarnBall(px, yarn, 0);
       break;
     case 'inspect': {
       const look = f % 8 < 4 ? 1 : 0;
       eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
-      // magnifying glass
+      // checking the stitches: the swatch in front, a magnifying glass over it
+      drawSwatch(px, yarn, ly, 3, 0);
       [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
       px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
       px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      drawYarnBall(px, yarn, 0);
       break;
     }
     case 'review':
@@ -475,24 +537,42 @@ function drawBlob(ctx, base, mood, f, tuft) {
       px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
       px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
       px(9, ey - 1, ink); px(10, ey - 1, ink);
+      drawSwatch(px, yarn, ly + 1, 3, 0);
+      drawYarnBall(px, yarn, 0);
       break;
     case 'work': {
       eyes(7, 12, ey + 1, blink ? 1 : 2);
-      // laptop in front
-      const ly = Math.round(cy) + 3 - bob;
-      for (let x = 5; x <= 14; x++) { px(x, ly + 1, '#7f7c92'); }
-      for (let x = 6; x <= 13; x++) { px(x, ly, '#9c99b0'); }
-      px(8 + (f % 4), ly, mix(base, 'white', .3));
+      // knitting: the ball unwinds, the strand runs up to two clicking needles, and a swatch grows below them
+      drawYarnBall(px, yarn, f % 3);
+      [[3, 16], [4, 16 - (f % 2)], [4, 15], [5, 15]].forEach(([x, y]) => px(x, y, yarn));
+      drawSwatch(px, yarn, ly + 1, 3, f);
+      px(7 + (f % 6), ly + 1, yarnLight); // the stitch being made
+      const k = f % 4 < 2; // needles take turns, so they click
+      const needle = '#e4e1f0', tip = '#ffffff';
+      for (let i = 0; i < 5; i++) { // a shadow under each needle, so it stands out against a light body
+        px(5 + i, ly + 2 - i - (k ? 1 : 0), yarnDark);
+        px(14 - i, ly + 2 - i - (k ? 0 : 1), yarnDark);
+      }
+      for (let i = 0; i < 5; i++) {
+        px(5 + i, ly + 1 - i - (k ? 1 : 0), i === 4 ? tip : needle);
+        px(14 - i, ly + 1 - i - (k ? 0 : 1), i === 4 ? tip : needle);
+      }
+      px(5, ly + 1 - (k ? 1 : 0), yarnLight); px(14, ly + 1 - (k ? 0 : 1), yarnLight); // coloured needle ends
       if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
       break;
     }
     case 'jump':
       [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
       px(9, ey + 3, ink); px(10, ey + 3, ink);
+      // tying it in: holds the strand end up towards the braid
+      for (let i = 0, y = ly - 2; y >= -2; i++, y--) px(15 + (((i + f) % 4) < 2 ? 0 : 1), y, i % 2 ? yarn : yarnLight);
+      px(14, ly - 1, yarn); px(14, ly, yarnDark);
+      drawYarnBall(px, yarn, f % 3);
       break;
     default:
       eyes(7, 12, ey, blink ? 1 : 2);
       px(9, ey + 3, ink); px(10, ey + 3, ink);
+      drawYarnBall(px, yarn, 0);
   }
   ctx.globalAlpha = 1;
 }
@@ -598,11 +678,11 @@ function renderEmpty() {
   $('main').dataset.empty = mode;
   document.body.classList.toggle('start-mode', mode === 'start');
   if (mode === 'start') {
-    $('main').innerHTML = `<div class="empty start"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas><div id="startHost" style="width:100%"></div></div>`;
+    $('main').innerHTML = `<div class="empty start"><canvas class="sprite" id="emptyKnot" width="24" height="24"></canvas><div id="startHost" style="width:100%"></div></div>`;
     mountComposer($('startHost')).focus();
     $('bubble').textContent = 'Tell me what to build.';
   } else {
-    $('main').innerHTML = `<div class="empty"><canvas class="sprite" id="emptyKnot" width="20" height="20"></canvas>
+    $('main').innerHTML = `<div class="empty"><canvas class="sprite" id="emptyKnot" width="24" height="24"></canvas>
       <div class="pixel" style="font-size:22px;color:var(--text)">No runs yet</div>
       <div>Draft a plan: <code class="mono">braid plan "your goal" --verify "npm test" --out plan.json</code></div>
       <div>Then run it: <code class="mono">braid run plan.json --watch</code></div>
@@ -638,6 +718,7 @@ function renderAll() {
       <section class="panel" aria-label="Task floor">
         <div class="panel-h"><h2 class="pixel">The floor</h2><span class="sub" id="floorSub"></span></div>
         <div class="goal" id="goal"></div>
+        <div class="howto">Each agent <b>knits one strand of wool</b>. When its strand passes your checks it is <b>tied into the braid</b> on the right. A strand between two agents means one has to finish before the other can start.</div>
         <div class="floor-wrap"><div class="floor" id="floor"><svg class="threads" id="threads"></svg></div></div>
       </section>
       <div class="side">
@@ -704,15 +785,15 @@ function buildFloor() {
   cols.forEach((col, i) => {
     const el = document.createElement('div');
     el.className = 'col';
-    el.innerHTML = `<div class="col-h pixel">${i === 0 ? 'Start' : 'Wave ' + (i + 1)}</div>`;
+    el.innerHTML = `<div class="col-h pixel">${i === 0 ? 'Step 1 - starts right away' : `Step ${i + 1} - after step ${i}`}</div>`;
     col.forEach((t, j) => {
       const b = document.createElement('button');
       b.className = 'desk';
       b.id = 'desk-' + t.id;
       b.style.setProperty('--tc', colorOf(t.id));
-      b.innerHTML = `<canvas class="sprite" width="20" height="20" aria-hidden="true"></canvas>
-        <div class="t">${esc(t.title || t.id)}</div>
-        <div class="id mono">${esc(t.id)}</div>
+      b.innerHTML = `<canvas class="sprite" width="24" height="24" aria-hidden="true"></canvas>
+        <div class="t">${esc(t.title || t.id)}<span class="id mono"> ${esc(t.id)}</span></div>
+        <div class="cap" data-cap></div>
         <div class="row"><span class="chip" data-chip></span><span class="dots" data-dots></span><span class="cost mono" data-cost></span></div>`;
       b.addEventListener('click', () => openInspector(t.id));
       el.appendChild(b);
@@ -723,6 +804,32 @@ function buildFloor() {
   });
   $('goal').textContent = S.plan.goal || '';
   new ResizeObserver(drawThreads).observe(floor);
+}
+
+/** What this agent is doing, in words: the desk used to show only a status chip. */
+function captionFor(t, s) {
+  const byId = Object.fromEntries(S.plan.tasks.map((x) => [x.id, x]));
+  const name = (id) => byId[id]?.title || id;
+  const retry = s.attempts > 1 ? ` (attempt ${s.attempts})` : '';
+  switch (s.status) {
+    case 'pending': {
+      const waiting = (t.deps || []).filter((d) => S.state.tasks[d]?.status !== 'done');
+      if (!waiting.length) return 'Ready: waiting for a free agent';
+      return `Waiting for ${waiting.slice(0, 2).map(name).join(' and ')}${waiting.length > 2 ? ` and ${waiting.length - 2} more` : ''}`;
+    }
+    case 'running': return `Knitting its strand${retry}`;
+    case 'resolving': return 'Untangling a clash with newer work';
+    case 'verifying': return 'Checking the stitches (running your tests)';
+    case 'reviewing': return 'A reviewer is looking it over';
+    case 'merging': return 'Tying its strand into the braid';
+    case 'replanning': return 'Tangled: asking the planner for a new plan';
+    case 'done': return 'Done: its strand is in the braid';
+    case 'failed': return 'Tangled: ' + (String(s.error || 'could not finish').split('\n')[0].slice(0, 70));
+    case 'blocked': return 'Stuck: a strand it needs did not finish';
+    case 'replaced': return 'Replaced by smaller tasks';
+    case 'skipped': return 'Skipped';
+    default: return '';
+  }
 }
 
 function maxAttempts(t) { return Math.max(1, t.maxAttempts ?? S.plan.maxAttempts ?? 2); }
@@ -746,19 +853,29 @@ function updateFloor() {
     const costEl = el.querySelector('[data-cost]');
     costEl.textContent = tokTotal(s.tokens) ? tokLine(s.tokens) : '';
     costEl.title = tokDetail(s.tokens);
+    const cap = el.querySelector('[data-cap]');
+    cap.textContent = captionFor(t, s);
+    cap.className = 'cap ' + s.status;
     el.classList.toggle('sel', S.selected === t.id);
-    el.setAttribute('aria-label', `${t.title || t.id}: ${s.status}, attempt ${s.attempts} of ${max}`);
+    el.setAttribute('aria-label', `${t.title || t.id}: ${captionFor(t, s)}, attempt ${s.attempts} of ${max}`);
   }
   const active = Object.values(S.state.tasks).filter(t => ['running', 'resolving', 'verifying', 'reviewing', 'merging'].includes(t.status)).length;
-  $('floorSub').textContent = `${tasks.length} agents, ${active} active`;
+  $('floorSub').textContent = `${tasks.length} agents, ${active} knitting`;
 }
 
+/**
+ * Strands of wool between agents. A strand leaves the agent that has to finish first and ends in a knot at the agent
+ * that waits for it. Its look says how things stand: faint and thin until the first agent is done, then solid wool,
+ * and feeding through (the twist moves) while the second agent is working.
+ */
 function drawThreads() {
   const svg = $('threads'), floor = $('floor');
   if (!svg || !floor || !S.plan) return;
   const fr = floor.getBoundingClientRect();
   svg.setAttribute('width', floor.scrollWidth); svg.setAttribute('height', floor.scrollHeight);
-  const paths = [];
+  const ACTIVE = ['running', 'resolving', 'verifying', 'reviewing', 'merging', 'replanning'];
+  const out = [];
+  const spools = new Map();
   for (const t of S.plan.tasks) {
     const to = $('desk-' + t.id);
     for (const d of t.deps || []) {
@@ -766,22 +883,30 @@ function drawThreads() {
       if (!from || !to) continue;
       const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
       const horizontal = b.left - a.right > 10;
-      let p;
+      let x1, y1, x2, y2, p;
       if (horizontal) {
-        const x1 = a.right - fr.left, y1 = a.top + a.height / 2 - fr.top, x2 = b.left - fr.left, y2 = b.top + b.height / 2 - fr.top;
+        x1 = a.right - fr.left; y1 = a.top + a.height / 2 - fr.top; x2 = b.left - fr.left; y2 = b.top + b.height / 2 - fr.top;
         const mx = (x1 + x2) / 2;
         p = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
       } else {
-        const x1 = a.left + a.width / 2 - fr.left, y1 = a.bottom - fr.top, x2 = b.left + b.width / 2 - fr.left, y2 = b.top - fr.top;
+        x1 = a.left + a.width / 2 - fr.left; y1 = a.bottom - fr.top; x2 = b.left + b.width / 2 - fr.left; y2 = b.top - fr.top;
         const my = (y1 + y2) / 2;
         p = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
       }
-      const ts = S.state.tasks[t.id]?.status;
-      const cls = ['running', 'resolving', 'verifying', 'reviewing', 'merging', 'replanning'].includes(ts) ? 'live' : ts === 'blocked' || ts === 'skipped' || ts === 'replaced' ? 'dim' : '';
-      paths.push(`<path d="${p}" stroke="${colorOf(d)}" class="${cls}"/>`);
+      const src = S.state.tasks[d]?.status, dst = S.state.tasks[t.id]?.status;
+      const color = colorOf(d);
+      let kind = 'unspun';
+      if (src === 'done') kind = ACTIVE.includes(dst) ? 'feeding' : dst === 'done' ? 'spent' : 'ready';
+      else if (['failed', 'blocked', 'skipped', 'replaced'].includes(src)) kind = 'snapped';
+      out.push(`<g class="strand ${kind}"><path class="wool" d="${p}" stroke="${color}"/><path class="twist" d="${p}"/></g>`);
+      // the knot where the strand is tied on at the waiting agent: filled once the wool has arrived
+      out.push(`<circle class="knot ${kind}" cx="${x2}" cy="${y2}" r="5" style="--c:${color}"/>`);
+      spools.set(d, { x: x1, y: y1, color });
     }
   }
-  svg.innerHTML = paths.join('');
+  // a small ball of wool at the start of every strand, so it is clear where it comes from
+  for (const [, s] of spools) out.push(`<circle class="spool" cx="${s.x}" cy="${s.y}" r="6" style="--c:${s.color}"/>`);
+  svg.innerHTML = out.join('');
 }
 
 function mergeOrder() {

@@ -72,7 +72,7 @@ containers (see the roadmap) for untrusted work.
 ## Roadmap
 
 1. ~~**Cheaper conflict handling.**~~ Shipped. On a merge conflict braid merges the newer integration work into the task branch, and a narrow resolver agent removes the markers while keeping both sides' changes. The task is not redone. Nothing is committed while markers remain. A combined-tree verify failure is fixed on top of the existing work the same way. In the real smoke run the resolver cost $0.09, versus about $0.21 for a full redo.
-2. **Resume.** Restart an interrupted run from `state.json`, reusing tasks that are already merged.
+2. ~~**Resume.**~~ Shipped as `braid resume [runId]`. Merged tasks stay done, every other task is retried with fresh attempts, and spend carries over so the budget covers the whole run. The integration branch is rewound to `verifiedHead` (the head after the last verified merge), which drops any half-done merge from a crash. A run whose process is still alive is refused.
 3. ~~**Watch UI.**~~ Shipped as `braid watch`, `braid run --watch` and `braid demo`: a local read-only page (`ui/index.html`, `src/watch.ts`) that tails the run files over SSE.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.

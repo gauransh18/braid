@@ -75,6 +75,11 @@ export interface RunState {
   costUsd: number;
   createdAt: string;
   endedAt?: string;
+  /** Integration head after the last verified merge. Resume rewinds to it, dropping any half-done merge. */
+  verifiedHead?: string;
+  /** Process driving the run, so resume can refuse a run that is still alive. */
+  pid?: number;
+  resumes?: number;
   tasks: Record<string, TaskState>;
 }
 

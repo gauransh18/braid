@@ -16,6 +16,8 @@ export interface OrchestratorOptions {
   signal?: AbortSignal;
   /** Keep worktrees of successful tasks (debugging). */
   keepWorktrees?: boolean;
+  /** Continue the existing run `runId`: merged tasks stay done, everything else is retried. */
+  resume?: boolean;
 }
 
 const TERMINAL: TaskStatus[] = ['done', 'failed', 'blocked', 'skipped'];
@@ -39,6 +41,7 @@ export class Orchestrator {
   constructor(private readonly opts: OrchestratorOptions) {
     validatePlan(opts.plan);
     this.plan = opts.plan;
+    if (opts.resume && !opts.runId) throw new Error('resume needs a runId');
     this.runId = opts.runId ?? newRunId();
     this.git = new Git(opts.repo);
     this.store = new RunStore(opts.repo, this.runId);
@@ -77,22 +80,35 @@ export class Orchestrator {
   async run(): Promise<RunState> {
     const { repo, plan } = this.opts;
     await this.git.excludeStateDir();
-    const base = plan.base ?? (await this.git.currentBranch());
-    this.state = {
-      runId: this.runId,
-      repo,
-      base,
-      integrationBranch: this.branch('integration'),
-      status: 'running',
-      costUsd: 0,
-      createdAt: new Date().toISOString(),
-      tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
-    };
-    await this.store.savePlan(plan);
     this.integrationDir = this.worktreeDir('_integration');
-    await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base);
+    if (this.opts.resume) {
+      await this.restore();
+      await this.git.removeWorktree(this.integrationDir);
+      await this.git.attachWorktree(this.integrationDir, this.state.integrationBranch);
+      // Rewind to the last verified state: a crash mid-merge may have left an unverified commit or markers.
+      await this.git.resetHard(this.integrationDir, this.state.verifiedHead!);
+      await this.git.cleanUntracked(this.integrationDir);
+    } else {
+      const base = plan.base ?? (await this.git.currentBranch());
+      this.state = {
+        runId: this.runId,
+        repo,
+        base,
+        integrationBranch: this.branch('integration'),
+        status: 'running',
+        costUsd: 0,
+        createdAt: new Date().toISOString(),
+        tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
+      };
+      await this.store.savePlan(plan);
+      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base);
+      this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
+    }
+    this.state.pid = process.pid;
     await this.runSetup(this.integrationDir);
-    this.store.event('run_start', { base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
+    if (!this.opts.resume) {
+      this.store.event('run_start', { base: this.state.base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
+    }
     await this.save();
 
     try {
@@ -107,6 +123,40 @@ export class Orchestrator {
     this.store.event('run_end', { status: this.state.status, costUsd: this.state.costUsd });
     await this.save();
     return this.state;
+  }
+
+  /**
+   * Load state.json of an interrupted run. Merged tasks stay done; every other task goes back to
+   * pending with fresh attempts (its spend is kept, so the budget still covers the whole run).
+   */
+  private async restore(): Promise<void> {
+    const prev = await RunStore.loadState(this.opts.repo, this.runId);
+    if (prev.status === 'running' && prev.pid && prev.pid !== process.pid && pidAlive(prev.pid)) {
+      throw new Error(`run ${this.runId} is still running (pid ${prev.pid})`);
+    }
+    if (prev.status === 'done') throw new Error(`run ${this.runId} already finished`);
+    const unknown = Object.keys(prev.tasks).filter((id) => !this.tasks.has(id));
+    if (unknown.length) throw new Error(`plan no longer has task(s) from this run: ${unknown.join(', ')}`);
+    if (!(await this.git.branchExists(prev.integrationBranch))) {
+      throw new Error(`integration branch ${prev.integrationBranch} is gone; cannot resume`);
+    }
+    prev.verifiedHead ??= await this.git.revParse(prev.integrationBranch);
+    const done: string[] = [];
+    const retry: string[] = [];
+    for (const id of this.tasks.keys()) {
+      const t = prev.tasks[id];
+      if (t?.status === 'done') {
+        done.push(id);
+        continue;
+      }
+      retry.push(id);
+      prev.tasks[id] = { id, status: 'pending', attempts: 0, costUsd: t?.costUsd ?? 0 };
+    }
+    prev.status = 'running';
+    delete prev.endedAt;
+    prev.resumes = (prev.resumes ?? 0) + 1;
+    this.state = prev;
+    this.store.event('run_resume', { done, retry, costUsd: prev.costUsd });
   }
 
   private overBudget(): boolean {
@@ -323,6 +373,7 @@ export class Orchestrator {
         this.store.event('merge_reverted', { task: task.id });
         return { ok: false, reason: `Your change passed on its own but broke verification once combined with other tasks' merged work, which is now in your worktree. Fix your change so the combined tree passes; do not redo the task.\n${v.report}` };
       }
+      this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
       return { ok: true, reason: '' };
     });
     this.mergeChain = job.catch(() => undefined);
@@ -342,6 +393,15 @@ export class Orchestrator {
     });
     this.mergeChain = job.catch(() => undefined);
     return job;
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

@@ -40,6 +40,21 @@ export class Git {
     await this.run(['worktree', 'add', '-b', newBranch, path, from]);
   }
 
+  /** Check out an existing branch into a new worktree. */
+  async attachWorktree(path: string, branch: string): Promise<void> {
+    await this.run(['worktree', 'prune']);
+    await this.run(['worktree', 'add', path, branch]);
+  }
+
+  async branchExists(branch: string): Promise<boolean> {
+    return (await this.run(['rev-parse', '-q', '--verify', `refs/heads/${branch}`], this.repo, true)).code === 0;
+  }
+
+  /** Discard untracked files in a harness-owned worktree. */
+  async cleanUntracked(cwd: string): Promise<void> {
+    await this.run(['clean', '-fdq'], cwd);
+  }
+
   async removeWorktree(path: string): Promise<void> {
     await this.run(['worktree', 'remove', '--force', path], this.repo, true);
   }

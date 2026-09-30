@@ -257,4 +257,69 @@ describe('orchestrator', () => {
     assert.equal(state.tasks.b!.status, 'skipped');
     assert.equal(state.costUsd, 1);
   });
+
+  it('resumes a failed run: merged tasks are kept, the rest retried, spend carries over', async () => {
+    const repo = await makeRepo();
+    const plan: PlanSpec = {
+      goal: 'g',
+      driver: 'mock',
+      verify: ['node check.js'],
+      maxAttempts: 1,
+      tasks: [
+        { id: 'a', title: 'A', prompt: 'p' },
+        { id: 'b', title: 'B', prompt: 'p', deps: ['a'] },
+        { id: 'c', title: 'C', prompt: 'p', deps: ['b'] },
+      ],
+    };
+    const first = new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(new MockDriver((o) => ({ files: { [`${taskOf(o)}.txt`]: taskOf(o) === 'b' ? 'bad\n' : 'ok\n' }, costUsd: 1 }))) });
+    const s1 = await first.run();
+    assert.equal(s1.status, 'failed');
+    assert.equal(s1.tasks.a!.status, 'done');
+    assert.equal(s1.tasks.c!.status, 'blocked');
+
+    const mock = new MockDriver((o) => ({ files: { [`${taskOf(o)}.txt`]: 'ok\n' }, costUsd: 1 }));
+    const second = new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock), runId: first.runId, resume: true });
+    const s2 = await second.run();
+    assert.equal(s2.status, 'done');
+    assert.equal(s2.integrationBranch, s1.integrationBranch);
+    assert.deepEqual(mock.calls.map(taskOf).sort(), ['b', 'c'], 'task a must not run again');
+    assert.equal(s2.tasks.b!.attempts, 1);
+    assert.equal(s2.costUsd, 4, 'a+b from run 1, b+c from resume');
+    assert.equal(s2.resumes, 1);
+    for (const f of ['a.txt', 'b.txt', 'c.txt']) assert.equal(await show(repo, s2.integrationBranch, f), 'ok\n');
+  });
+
+  it('resume rewinds an unverified merge left by a crash', async () => {
+    const repo = await makeRepo();
+    const plan: PlanSpec = { goal: 'g', driver: 'mock', verify: ['node check.js'], tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p' }] };
+    const first = new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(new MockDriver((o) => ({ files: { [`${taskOf(o)}.txt`]: 'ok\n' } }))) });
+    const s1 = await first.run();
+    // Simulate a crash: an unverified commit on the integration branch and task b not recorded as done.
+    const dir = join(repo, '.braid', 'worktrees', 'crash');
+    await exec('git', ['worktree', 'add', dir, s1.integrationBranch], { cwd: repo });
+    writeFileSync(join(dir, 'poison.txt'), 'bad\n');
+    await exec('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A'], { cwd: dir });
+    await exec('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'unverified'], { cwd: dir });
+    await exec('git', ['worktree', 'remove', '--force', dir], { cwd: repo });
+    const statePath = join(first.store.dir, 'state.json');
+    const st = JSON.parse(readFileSync(statePath, 'utf8'));
+    st.status = 'running';
+    st.pid = 2 ** 22 + 1;
+    st.tasks.b.status = 'merging';
+    writeFileSync(statePath, JSON.stringify(st));
+
+    const mock = new MockDriver((o) => ({ files: { [`${taskOf(o)}.txt`]: 'ok\n' } }));
+    const s2 = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock), runId: first.runId, resume: true }).run();
+    assert.equal(s2.status, 'done');
+    assert.deepEqual(mock.calls.map(taskOf), ['b']);
+    await assert.rejects(show(repo, s2.integrationBranch, 'poison.txt'));
+  });
+
+  it('refuses to resume a finished run', async () => {
+    const repo = await makeRepo();
+    const plan: PlanSpec = { goal: 'g', driver: 'mock', tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
+    const drivers = () => new DriverRegistry().register(new MockDriver(() => ({ files: { 'a.txt': 'a' } })));
+    const s1 = await new Orchestrator({ repo, plan, drivers: drivers() }).run();
+    await assert.rejects(new Orchestrator({ repo, plan, drivers: drivers(), runId: s1.runId, resume: true }).run(), /already finished/);
+  });
 });

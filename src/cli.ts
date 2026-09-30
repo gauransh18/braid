@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ClaudeDriver } from './drivers/claude.js';
 import { CodexDriver } from './drivers/codex.js';
@@ -10,8 +11,8 @@ import { Git } from './git.js';
 import { Orchestrator } from './orchestrator.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
-import { RunStore, type HarnessEvent } from './store.js';
-import type { RunState } from './types.js';
+import { RunStore, stateRoot, type HarnessEvent } from './store.js';
+import type { PlanSpec, RunState } from './types.js';
 import { startWatch } from './watch.js';
 
 const USAGE = `braid - headless multi-agent harness
@@ -19,6 +20,8 @@ const USAGE = `braid - headless multi-agent harness
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
   braid run <plan.json> [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
+  braid resume [runId] [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
+                                 continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777]      live dashboard for this repo's runs
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
   braid status [runId]
@@ -59,6 +62,9 @@ function printEvent(e: HarnessEvent): void {
     case 'run_start':
       console.log(`${t} run started on ${e.base}; integration branch ${e.integrationBranch}`);
       break;
+    case 'run_resume':
+      console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
+      break;
     case 'run_end':
       console.log(`${t} run ${e.status}; spend $${Number(e.costUsd).toFixed(2)}`);
       break;
@@ -71,6 +77,16 @@ function printState(s: RunState): void {
     const err = t.error ? `  ${t.error.split('\n')[0]!.slice(0, 120)}` : '';
     console.log(`  ${t.id.padEnd(24)} ${t.status.padEnd(10)} attempts=${t.attempts} $${t.costUsd.toFixed(2)}${err}`);
   }
+}
+
+/** Newest run that did not finish cleanly. */
+async function latestUnfinished(repo: string): Promise<string> {
+  const runs = await RunStore.listRuns(repo);
+  for (const id of runs.reverse()) {
+    const s = await RunStore.loadState(repo, id).catch(() => null);
+    if (s && s.status !== 'done') return id;
+  }
+  throw new Error('no unfinished runs to resume');
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -133,9 +149,16 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     return 0;
   }
 
-  if (cmd === 'run') {
-    if (!arg) throw new Error('run needs a plan file');
-    const plan = await loadPlan(arg);
+  if (cmd === 'run' || cmd === 'resume') {
+    let plan: PlanSpec;
+    let runId: string | undefined;
+    if (cmd === 'run') {
+      if (!arg) throw new Error('run needs a plan file');
+      plan = await loadPlan(arg);
+    } else {
+      runId = arg ?? (await latestUnfinished(repo));
+      plan = await loadPlan(join(stateRoot(repo), 'runs', runId, 'plan.json'));
+    }
     if (values.concurrency) plan.concurrency = Number(values.concurrency);
     if (values.budget) plan.budgetUsd = Number(values.budget);
     if (values.driver) plan.driver = values.driver;
@@ -144,7 +167,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
       console.log('\ninterrupt: stopping agents, keeping merged work...');
       ac.abort();
     });
-    const orch = new Orchestrator({ repo, plan, drivers: registry(), signal: ac.signal, keepWorktrees: values['keep-worktrees'] });
+    const orch = new Orchestrator({ repo, plan, drivers: registry(), signal: ac.signal, keepWorktrees: values['keep-worktrees'], runId, resume: cmd === 'resume' });
     orch.store.onEvent(printEvent);
     if (values.watch) {
       const watch = await startWatch(repo, port);
@@ -153,9 +176,11 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     const state = await orch.run();
     console.log('');
     printState(state);
-    if (state.status !== 'aborted') {
+    if (state.status === 'aborted') console.log(`\nResume:  braid resume ${state.runId}`);
+    else {
       console.log(`\nReview:  git log --oneline ${state.base}..${state.integrationBranch}`);
       console.log(`Merge:   git merge ${state.integrationBranch}`);
+      if (state.status === 'failed') console.log(`Retry:   braid resume ${state.runId}`);
     }
     return state.status === 'done' ? 0 : 2;
   }

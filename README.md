@@ -34,6 +34,12 @@ git merge braid/<runId>/integration
 
 Press Ctrl-C to stop the agents. Work already merged stays on the integration branch.
 
+To continue an interrupted or failed run, keep the merged work and retry the rest:
+
+```bash
+braid resume [runId] --budget 10   # defaults to the newest unfinished run
+```
+
 ## Watch it live
 
 ```bash

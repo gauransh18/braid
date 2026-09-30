@@ -5,6 +5,7 @@ import { addTokens, describeTokens, formatCost, formatTokens } from '../src/toke
 import { ClaudeDriver, claudeTokens, parseClaudeLine } from '../src/drivers/claude.js';
 import { estimateCostUsd, priceFor } from '../src/pricing.js';
 import { checkTools, doctorExitCode, formatDoctor } from '../src/doctor.js';
+import { exec, streamLines } from '../src/proc.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
 
@@ -178,5 +179,23 @@ describe('doctor', () => {
     const noGit = await checkTools([tool('git', '/nonexistent/git', true), tool('claude', 'git')]);
     assert.equal(doctorExitCode(noGit), 1);
     assert.match(formatDoctor(noGit), /MISSING\s+git/);
+  });
+});
+
+describe('child process stdin', () => {
+  it('does not crash when the child exits or fails to start before reading its input', async () => {
+    let uncaught: unknown;
+    const onUncaught = (e: unknown) => (uncaught = e);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const early = await exec('node', ['-e', 'process.exit(0)'], { cwd: '.', input: 'x'.repeat(20_000_000), allowFail: true });
+      assert.equal(early.code, 0);
+      await assert.rejects(exec('/nonexistent/tool', ['--version'], { cwd: '.', input: 'x' }), /ENOENT/);
+      await assert.rejects(streamLines('/nonexistent/agent', [], { cwd: '.', input: 'prompt' }, () => undefined), /ENOENT/);
+      await new Promise((r) => setTimeout(r, 300)); // an EPIPE would surface asynchronously
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+    assert.equal(uncaught, undefined);
   });
 });

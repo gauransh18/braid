@@ -22,6 +22,9 @@ export async function exec(
     child.stderr.on('data', (d) => (stderr += d));
     child.on('error', reject);
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    // A child that exits (or never starts) before reading stdin makes the write fail with EPIPE. That is not an
+    // error of ours: the exit code or the spawn error already says what happened, so swallow it here.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(opts.input ?? '');
   });
   if (res.code !== 0 && !opts.allowFail) {
@@ -78,6 +81,10 @@ export async function streamLines(
     child.on('error', reject);
     child.on('close', (code) => resolve(code ?? 1));
   });
+  // A spawn failure (binary not installed) rejects before we start awaiting `done`; mark it handled so Node does
+  // not treat that as a crash. The `await done` below still throws it, and the task fails with a clear message.
+  done.catch(() => undefined);
+  child.stdin.on('error', () => undefined); // see exec(): an agent that dies before reading its prompt is reported by its exit
   child.stdin.end(opts.input);
   const rl = createInterface({ input: child.stdout });
   for await (const line of rl) if (line.trim()) onLine(line);

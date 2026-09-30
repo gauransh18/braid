@@ -52,8 +52,10 @@ function programs(files: Record<string, string | Buffer>): string {
   const dir = mkdtempSync(join(tmpdir(), 'braid-cli-'));
   temps.push(dir);
   for (const [name, content] of Object.entries(files)) {
-    writeFileSync(join(dir, name), content);
-    chmodSync(join(dir, name), 0o755);
+    // Windows finds programs through PATHEXT, so a fake agent needs an extension there.
+    const file = process.platform === 'win32' ? `${name}.exe` : name;
+    writeFileSync(join(dir, file), content);
+    chmodSync(join(dir, file), 0o755);
   }
   return dir;
 }
@@ -200,7 +202,7 @@ describe('model names from an installed CLI (no key needed)', () => {
     const res = await fetchModels('claude', { PATH: programs({ claude: bin }) });
     assert.equal(res.source, 'cli');
     assert.deepEqual(res.models, ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-4-1']);
-    assert.match(res.from!, /claude$/);
+    assert.match(res.from!, /claude(\.exe)?$/);
   });
 
   it('reads Codex gpt-5+ names and drops older models and file names', async () => {
@@ -209,7 +211,8 @@ describe('model names from an installed CLI (no key needed)', () => {
     assert.deepEqual(res.models, ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.3-codex', 'gpt-5.1-codex-max']);
   });
 
-  it('reads the Gemini CLI from its bundle files and skips image, live and base variants', async () => {
+  // npm installs gemini as gemini.cmd on Windows, a shim with no bundle next to it, so this layout is Unix-only.
+  it('reads the Gemini CLI from its bundle files and skips image, live and base variants', { skip: process.platform === 'win32' && 'npm shims on Windows do not sit next to the bundle' }, async () => {
     const dir = programs({});
     const bundle = join(dir, 'bundle');
     mkdirSync(bundle);

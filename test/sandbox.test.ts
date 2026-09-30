@@ -120,7 +120,9 @@ describe('sandbox command lines', () => {
   });
 });
 
-describe('sandboxed runs', () => {
+// The stand-in container runtime is a script with a #!/usr/bin/env node line, which Windows cannot execute. The
+// real Docker path on Windows has not been tried.
+describe('sandboxed runs', { skip: process.platform === 'win32' && 'stand-in runtime is a shebang script' }, () => {
   it('runs setup and verify in the container, and the agent on the host by default', async () => {
     const rt = fakeRuntime();
     const repo = await makeRepo();

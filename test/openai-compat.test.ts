@@ -164,7 +164,7 @@ describe('openai-compatible driver', () => {
   });
 
   it('runs commands only when the plan allows them, in the worktree', async () => {
-    const api = await fakeApi([call('run_command', { command: 'echo hi from $(pwd | xargs basename)' }, 'c1'), call('run_command', { command: 'rm -rf /' }, 'c2'), say('ok')]);
+    const api = await fakeApi([call('run_command', { command: 'echo hi from the worktree' }, 'c1'), call('run_command', { command: 'rm -rf /' }, 'c2'), say('ok')]);
     try {
       const cwd = worktree();
       const { events } = await run(api.url, { cwd, allowedTools: ['Read', 'Bash(echo:*)'] });

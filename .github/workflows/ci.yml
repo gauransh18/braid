@@ -21,4 +21,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:binary
+        if: ${{ !cancelled() }}
       - run: node scripts/smoke.mjs
+        if: ${{ !cancelled() }}

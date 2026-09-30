@@ -709,8 +709,12 @@ fn main() {
                 }
             }
             if !placed {
-                // A platform whose default menu has no File menu: add our own.
-                menu.append(&SubmenuBuilder::new(app, "File").item(&new).item(&open).build()?)?;
+                // A platform whose default menu has no File menu: add our own, with Settings in it unless the app menu took it.
+                let mut file = SubmenuBuilder::new(app, "File").item(&new).item(&open);
+                if !settings_placed {
+                    file = file.separator().item(&settings_item);
+                }
+                menu.append(&file.build()?)?;
             }
             app.set_menu(menu)?;
 

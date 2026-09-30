@@ -20,14 +20,19 @@ Run `braid doctor` to see what is missing and how to install it.
 
 ### Windows
 
-Download `braid-windows-x64.exe` from the [releases](https://github.com/gauransh18/braid/releases). It is a **command-line
-program**: double-clicking it only explains that. Open PowerShell or Windows Terminal in your project folder and run it
-there, for example `.\braid-windows-x64.exe doctor`. To run it as plain `braid`, rename it to `braid.exe` and put it in a
-folder on your PATH. You also need [git for Windows](https://git-scm.com/download/win) and at least one agent (Claude
-Code, Codex or Gemini CLI, installed with npm or their installers) or an NVIDIA API key. The download is not code-signed yet,
-so SmartScreen may say "Windows protected your PC": choose **More info**, then **Run anyway**. The build runs on CPUs without
-AVX2, and on Windows on ARM through emulation. Every release is tested on real Windows machines (x64 and ARM) before it
-is published; the desktop app is macOS-only for now.
+**The app (recommended):** download `Braid_<version>_x64-setup.exe` from the [releases](https://github.com/gauransh18/braid/releases)
+and run it. It installs for your user (no administrator needed) and works like the Mac app: a small launcher (open a
+repository, recent repositories, a demo), a dashboard window per repository, a notification-area icon, and Settings for
+agents, models and API keys (keys are kept in Windows Credential Manager). It needs [git for Windows](https://git-scm.com/download/win)
+and at least one agent (Claude Code, Codex or Gemini CLI) or an NVIDIA API key. It is not code-signed yet, so SmartScreen may
+say "Windows protected your PC": choose **More info**, then **Run anyway**. It needs the Microsoft WebView2 runtime, which Windows 11 has
+and the installer fetches on Windows 10.
+
+**The command line:** `braid-windows-x64.exe` is a command-line program: double-clicking it only explains that. Open PowerShell
+or Windows Terminal in your project folder and run it there, for example `.\braid-windows-x64.exe doctor`; rename it to
+`braid.exe` and put it on your PATH to run it as plain `braid`. It runs on CPUs without AVX2, and on Windows on ARM through
+emulation. Every release is tested on real Windows machines (x64 and ARM) before it is published: the program end to end, and
+the app by installing it and launching it.
 
 ### Single-file executable
 
@@ -59,15 +64,15 @@ To continue an interrupted or failed run, keep the merged work and retry the res
 braid resume [runId]   # defaults to the newest unfinished run
 ```
 
-## Desktop app (macOS)
+## Desktop app (macOS and Windows)
 
-`npm run build:desktop` builds `Braid.app` and a `.dmg` (about 30 MB) with [Tauri](https://tauri.app). It opens a small
+`npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. It opens a small
 **launcher** window, not an empty dashboard: **Open Repository...**, **Watch a demo run** (mock agents, nothing spent) and
 a list of recent repositories. Picking one opens a dashboard window for it, with the single-file braid executable
 running in the background as that repository's server. **File > Open Repository...** (Cmd+O) switches the current window
 to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories
 at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu.
-**Braid > Settings...** (Cmd+,) manages the agents: which of Claude Code, Codex and Gemini CLI are installed, plus **NVIDIA NIM** (a hosted API: add an `nvapi-` key and pick a model; braid runs the agent loop itself) (with install commands for the ones that are not), which is the default, which model each uses (type any name, or pick from a current list, which Braid refreshes every time it starts and on **Refresh list**: the provider's own live list when you saved a key, otherwise the model names read from the installed Claude Code, Codex or Gemini CLI itself (they follow the CLI when you update it); the Claude aliases `opus`, `sonnet` and `haiku` always mean the newest), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Each agent has an **Enabled** switch: a switched-off agent is never used as the default, and a plan that asks for it is refused with a clear message. Each provider card has a **Test connection** button (key, reachability, the chosen model and, for NIM, tool calling). Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
+**Braid > Settings...** (Cmd+,; on Windows: File > Settings) manages the agents: which of Claude Code, Codex and Gemini CLI are installed, plus **NVIDIA NIM** (a hosted API: add an `nvapi-` key and pick a model; braid runs the agent loop itself) (with install commands for the ones that are not), which is the default, which model each uses (type any name, or pick from a current list, which Braid refreshes every time it starts and on **Refresh list**: the provider's own live list when you saved a key, otherwise the model names read from the installed Claude Code, Codex or Gemini CLI itself (they follow the CLI when you update it); the Claude aliases `opus`, `sonnet` and `haiku` always mean the newest), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Each agent has an **Enabled** switch: a switched-off agent is never used as the default, and a plan that asks for it is refused with a clear message. Each provider card has a **Test connection** button (key, reachability, the chosen model and, for NIM, tool calling). Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server;
 the last window hides to the menu bar, whose icon shows how many runs are active (**Quit Braid** really quits). macOS
 notifications announce a finished, failed or stopped run and each task that fails, but only while no window is focused (the
 first launch asks for notification permission). Needs Rust, Bun and the Tauri CLI

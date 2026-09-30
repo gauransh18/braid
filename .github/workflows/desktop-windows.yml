@@ -3,6 +3,7 @@
 name: desktop-windows
 on:
   push:
+    paths: ['desktop/**', 'ui/**', 'src/**', 'scripts/build-desktop.mjs', 'scripts/smoke-desktop-windows.ps1', '.github/workflows/desktop-windows.yml']
   workflow_dispatch:
 jobs:
   build:

@@ -1,6 +1,6 @@
 # Builds the command-line executables and publishes them, but only after the exact files that would be published
 # pass an end-to-end smoke test on real machines: Windows (x64 and ARM), Linux and macOS.
-# Trigger: push a tag like v0.2.1. The Mac app (.dmg) is built locally and attached by hand.
+# Trigger: push a tag like v0.3.0. The Windows installer is built here; the Mac app (.dmg) is built locally and attached by hand.
 name: release
 on:
   push:
@@ -49,18 +49,69 @@ jobs:
         run: chmod +x bin/*
       - run: node scripts/smoke.mjs bin/${{ matrix.file }}
 
+  # The Windows desktop app: built, then installed on a real Windows machine and launched on a test repository.
+  desktop-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop/src-tauri }
+      - run: npm ci
+      - run: npm run build:desktop
+      - name: Install and launch the app
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
+          pwsh scripts/smoke-desktop-windows.ps1 -Installer $setup
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-screenshot
+          path: desktop-windows.png
+
+  # The same installer on Windows on ARM, where the x64 app runs through emulation.
+  desktop-windows-arm:
+    needs: desktop-windows
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: windows-installer, path: installer }
+      - name: Install and launch the app
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem installer/*-setup.exe | Select-Object -First 1).FullName
+          pwsh scripts/smoke-desktop-windows.ps1 -Installer $setup -Screenshot desktop-windows-arm.png
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-arm-screenshot
+          path: desktop-windows-arm.png
+
   publish:
-    needs: smoke
+    needs: [smoke, desktop-windows, desktop-windows-arm]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with: { name: executables, path: dist/bin }
+      - uses: actions/download-artifact@v4
+        with: { name: windows-installer, path: dist/bin }
       - name: Checksums
-        run: cd dist/bin && sha256sum braid-* > SHA256SUMS
+        run: cd dist/bin && sha256sum braid-* *-setup.exe > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             dist/bin/braid-*
+            dist/bin/*-setup.exe
             dist/bin/SHA256SUMS

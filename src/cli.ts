@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { ClaudeDriver } from './drivers/claude.js';
 import { CodexDriver } from './drivers/codex.js';
 import { DriverRegistry } from './drivers/driver.js';
+import { GeminiDriver } from './drivers/gemini.js';
 import { MockDriver } from './drivers/mock.js';
 import { createDemoRun } from './demo.js';
 import { formatSummary, loadSuite, parseVariants, runEval, saveResults, summarize, variantLabel } from './eval.js';
@@ -34,7 +35,7 @@ Runs never touch your branches. Work lands on braid/<runId>/integration;
 review it and merge it yourself.`;
 
 function registry(): DriverRegistry {
-  return new DriverRegistry().register(new ClaudeDriver()).register(new CodexDriver()).register(new MockDriver());
+  return new DriverRegistry().register(new ClaudeDriver()).register(new CodexDriver()).register(new GeminiDriver()).register(new MockDriver());
 }
 
 function printEvent(e: HarnessEvent): void {

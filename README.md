@@ -15,7 +15,7 @@ npm run build
 npm link   # puts `braid` on PATH
 ```
 
-You need Node 22 or later, git, and at least one agent CLI signed in (`claude`, optionally `codex`).
+You need Node 22 or later, git, and at least one agent CLI signed in (`claude`, optionally `codex` or `gemini`).
 
 ## Use
 
@@ -78,7 +78,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `concurrency` | plan | Maximum tasks running at once (default 3) |
 | `budgetUsd` | plan | Hard spend cap for the run |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |
-| `driver`, `model` | both | `claude` (default), `codex`, `mock` |
+| `driver`, `model` | both | `claude` (default), `codex`, `gemini`, `mock` |
 | `verify` | both | Commands that must exit 0 |
 | `review` | both | Run a read-only reviewer on the diff |
 | `maxAttempts` | both | Tries, including retries with feedback (default 2) |

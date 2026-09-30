@@ -40,7 +40,7 @@ plan.json ─► Orchestrator (code, deterministic)
 ```
 
 - `src/orchestrator.ts`: the scheduler, the task lifecycle, and serialized merges followed by verification.
-- `src/drivers/*`: the `Driver` interface plus the Claude, Codex (not yet tested against a live install) and mock drivers. Every CLI maps to one `AgentEvent` stream.
+- `src/drivers/*`: the `Driver` interface plus the Claude, Codex, Gemini (both not yet tested against a live install) and mock drivers. Every CLI maps to one `AgentEvent` stream.
 - `src/git.ts`: worktrees, commits, merges. It only ever writes to `braid/*` branches.
 - `src/store.ts`: `.braid/runs/<id>/` holds `plan.json`, `state.json` (written atomically), `events.jsonl`, and `tasks/<id>/<role>-<n>.jsonl` with the full transcript of every agent turn.
 - `src/watch.ts` + `ui/index.html`: a read-only dashboard with no dependencies. It listens on loopback only, rejects foreign `Host` headers, and polls the run files (fs.watch is unreliable on Windows). The mascot and agent sprites are original pixel art drawn in code, under MIT.
@@ -77,7 +77,7 @@ containers (see the roadmap) for untrusted work.
 4. **Container sandbox.** An optional per-task container (Docker or Podman) so Bash can be allowed safely.
 5. **Shared team server.** A daemon that queues runs, gives a shared dashboard, holds team memory (lessons learned per repo, fed back into worker prompts) and posts to Slack.
 6. **Evals.** Started: `braid eval <suite.json> --variants claude:sonnet,codex` runs each case in a throwaway repo and reports pass rate, spend, $ per passing case, time and attempts per variant (`src/eval.ts`, starter suite in `evals/`). A case passes only if hidden acceptance tests, copied in after the run, pass on the integration branch, so agents cannot game it. Still to do: a larger suite of real-repo cases, repeated runs for variance, and a compare command over saved results.
-7. **More drivers.** Gemini CLI (`gemini -p --output-format stream-json`), OpenCode, and local models through an OpenAI-compatible endpoint.
+7. **More drivers.** Gemini CLI is in (`src/drivers/gemini.ts`, `driver: "gemini"`), written against the event schema in the gemini-cli 0.53 source but not yet run against a signed-in install. Workers run in `auto_edit` and reviewers in `plan`, so `allowedTools` and `maxTurns` do not apply, and spend is reported as 0 (tokens only), so `budgetUsd` does not bind it. Still to do: OpenCode, and local models through an OpenAI-compatible endpoint.
 8. **Replanning.** When a task fails for good, ask the planner to split or rewrite it instead of blocking its dependents.
 9. **Standalone installers for Windows and macOS.** Two steps:
    - **Single-file CLI.** Compile braid, with `ui/index.html` embedded, into one executable per platform using `bun build --compile` or Node SEA: `braid.exe` for Windows, and `braid` for macOS on both arm64 and x64. Ship through GitHub Releases, a Homebrew tap and winget. `git` and the agent CLIs stay user-installed, since they are vendor-owned and each user signs in with their own subscription. On first run, braid checks what is missing and shows how to install it.

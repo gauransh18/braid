@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
 import { ClaudeDriver, parseClaudeLine } from '../src/drivers/claude.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
@@ -56,5 +57,45 @@ describe('extractJson', () => {
     assert.deepEqual(extractJson('Sure:\n```json\n{"a": 1}\n```\nbye'), { a: 1 });
     assert.deepEqual(extractJson('verdict {"approve": true} end'), { approve: true });
     assert.equal(extractJson('no json'), null);
+  });
+});
+
+describe('gemini driver', () => {
+  const run = (lines: object[], code = 0) => {
+    const p = new GeminiStreamParser();
+    const events = lines.flatMap((l) => p.feed(JSON.stringify(l)));
+    return { events, res: p.finish(code, '') };
+  };
+
+  it('builds read-only args for reviewers and auto_edit for workers', () => {
+    const d = new GeminiDriver('gemini');
+    const base = { prompt: 'p', cwd: '.', allowedTools: [] };
+    const worker = d.buildArgs({ ...base, canEdit: true, model: 'gemini-2.5-pro' });
+    assert.deepEqual(worker.slice(worker.indexOf('--approval-mode'), worker.indexOf('--approval-mode') + 2), ['--approval-mode', 'auto_edit']);
+    assert.ok(worker.includes('gemini-2.5-pro'));
+    assert.ok(d.buildArgs({ ...base, canEdit: false }).includes('plan'));
+  });
+
+  it('keeps only the text after the last tool call as the answer', () => {
+    const { events, res } = run([
+      { type: 'init', session_id: 's1', model: 'm' },
+      { type: 'message', role: 'user', content: 'do it' },
+      { type: 'message', role: 'assistant', content: 'Let me look. ', delta: true },
+      { type: 'tool_use', tool_name: 'read_file', tool_id: 't1', parameters: { path: 'a' } },
+      { type: 'tool_result', tool_id: 't1', status: 'success', output: 'hello' },
+      { type: 'message', role: 'assistant', content: 'All ', delta: true },
+      { type: 'message', role: 'assistant', content: 'done.', delta: true },
+      { type: 'result', status: 'success', stats: {} },
+    ]);
+    assert.deepEqual(events.map((e) => e.kind), ['start', 'text', 'tool', 'tool_result', 'text', 'text']);
+    assert.deepEqual(res, { ok: true, text: 'All done.', costUsd: 0, sessionId: 's1' });
+  });
+
+  it('reports failure from an error result or a missing result', () => {
+    const failed = run([{ type: 'init', session_id: 's' }, { type: 'result', status: 'error', error: { type: 'X', message: 'quota exceeded' } }]);
+    assert.equal(failed.res.ok, false);
+    assert.match(failed.res.text, /quota exceeded/);
+    assert.equal(run([{ type: 'message', role: 'assistant', content: 'x' }], 1).res.ok, false);
+    assert.equal(run([{ type: 'result', status: 'success' }], 1).res.ok, false, 'non-zero exit is failure even after a success result');
   });
 });

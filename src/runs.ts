@@ -235,7 +235,10 @@ export class RunManager {
     } catch {
       throw new HttpError(404, 'no such run');
     }
+    // Resuming means "carry on". A spending limit an older plan was started with (the start screen used to ask for
+    // one) is already spent, so keeping it would stop the run again at once; drop it unless a new one is given.
     if (budgetUsd !== undefined) plan.budgetUsd = budgetUsd;
+    else delete plan.budgetUsd;
     return this.start(plan, runId);
   }
 

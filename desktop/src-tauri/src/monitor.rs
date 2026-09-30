@@ -102,6 +102,7 @@ pub fn diff(repo_name: &str, prev: &HashMap<String, RunSnap>, next: &HashMap<Str
             let body = match now.status.as_str() {
                 "done" => format!("Run finished: {}/{} tasks merged", now.done, now.total),
                 "aborted" => format!("Run stopped: {}/{} tasks merged", now.done, now.total),
+                _ if now.failed.is_empty() && now.blocked == 0 => format!("Run stopped early: {}/{} tasks merged. Open it to resume", now.done, now.total),
                 _ => format!("Run failed: {} failed, {} blocked, {}/{} merged", now.failed.len(), now.blocked, now.done, now.total),
             };
             notes.push(Note { title, body });

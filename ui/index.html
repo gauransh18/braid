@@ -83,7 +83,10 @@ button { font: inherit; color: inherit; }
   transform: rotate(45deg);
 }
 .spacer { flex: 1; }
-.run-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.actions { display: flex; align-items: center; gap: 8px; }
+/* second row of the header: which run, how it stands, the numbers */
+.runbar { flex-basis: 100%; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 9px; border-top: 1px solid var(--line); }
+.stats { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-left: auto; }
 .select {
   appearance: none; background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 10px center;
   border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 28px 6px 10px; color: var(--text); font-size: 13px;
@@ -98,11 +101,30 @@ button { font: inherit; color: inherit; }
 .pill.running { color: var(--info); background: var(--info-soft); border-color: transparent; }
 .pill.running::before { animation: blink 1s steps(2) infinite; }
 .pill.done { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
-.pill.failed, .pill.aborted { color: var(--err); background: var(--err-soft); border-color: transparent; }
+.pill.failed, .pill.attention { color: var(--err); background: var(--err-soft); border-color: transparent; }
+.pill.aborted, .pill.limit, .pill.stopped { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+
+/* what happened to the run, in words, with the next step */
+.banner { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 14px 20px 0; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--line-2); border-left-width: 5px; background: var(--panel); box-shadow: var(--shadow); }
+.banner .b-ico { font-size: 20px; line-height: 1; }
+.banner .b-text { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.banner .b-text b { font-size: 14.5px; }
+.banner .b-text span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.banner .b-text code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--bg-2); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+.banner .b-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.banner.done { border-left-color: var(--ok); }
+.banner.done .b-ico { color: var(--ok); }
+.banner.attention { border-left-color: var(--err); }
+.banner.attention .b-ico { color: var(--err); }
+.banner.limit, .banner.stopped, .banner.early { border-left-color: var(--warn); }
+.banner.limit .b-ico, .banner.stopped .b-ico, .banner.early .b-ico { color: var(--warn); }
+body.start-mode #runBanner { display: none; }
 @keyframes blink { 50% { opacity: .25; } }
-.stat { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
+.stat { display: flex; align-items: baseline; gap: 8px; }
 .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.stat .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.stat .v { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.stat .v b { font-weight: 600; }
+.stat .meter { width: 64px; }
 .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .meter.hot i { background: var(--warn); }
@@ -115,7 +137,7 @@ button { font: inherit; color: inherit; }
 .btn[disabled] { opacity: .5; cursor: default; }
 [hidden] { display: none !important; }
 /* The guided start has no run to show yet: keep the header to the logo and the theme toggle. */
-body.start-mode .run-meta > :not(#themeBtn), body.start-mode #bubble { display: none; }
+body.start-mode .actions > :not(#themeBtn), body.start-mode .runbar, body.start-mode #bubble { display: none; }
 .composer { width: min(720px, 100%); margin: 0 auto; text-align: left; display: flex; flex-direction: column; gap: 14px; color: var(--text); }
 .composer h2 { margin: 0; font-size: 20px; }
 .composer .lede { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -327,18 +349,23 @@ svg.threads .spool { fill: var(--c); stroke: rgba(0, 0, 0, .3); stroke-width: 1.
   </div>
   <div class="bubble" id="bubble" aria-live="polite">Loading the loom...</div>
   <div class="spacer"></div>
-  <div class="run-meta">
-    <select class="select" id="runPick" aria-label="Run"></select>
-    <span class="pill" id="runStatus">-</span>
-    <button class="btn primary" id="newRunBtn" hidden>New run</button>
+  <div class="actions">
     <button class="btn danger" id="stopBtn" hidden>Stop</button>
     <button class="btn" id="resumeBtn" hidden>Resume</button>
-    <div class="stat"><span class="k">Merged</span><span class="v" id="progressV">-</span><div class="meter"><i id="progressM"></i></div></div>
-    <div class="stat"><span class="k">Tokens</span><span class="v" id="spendV">-</span></div>
-    <div class="stat"><span class="k">Elapsed</span><span class="v" id="elapsedV">-</span></div>
+    <button class="btn primary" id="newRunBtn" hidden>New run</button>
     <button class="icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle theme">&#9680;</button>
   </div>
+  <div class="runbar">
+    <select class="select" id="runPick" aria-label="Run"></select>
+    <span class="pill" id="runStatus">-</span>
+    <div class="stats">
+      <div class="stat"><span class="k">In the braid</span><span class="v"><b id="progressV">-</b><div class="meter"><i id="progressM"></i></div></span></div>
+      <div class="stat"><span class="k">Tokens</span><span class="v" id="spendV">-</span></div>
+      <div class="stat"><span class="k">Time</span><span class="v" id="elapsedV">-</span></div>
+    </div>
+  </div>
 </header>
+<div class="banner" id="runBanner" hidden role="status"></div>
 
 <main id="main"></main>
 
@@ -745,26 +772,85 @@ function renderAll() {
 function renderHeader() {
   const st = S.state;
   const pill = $('runStatus');
-  pill.className = 'pill ' + (st?.status || '');
-  pill.textContent = st?.status || 'starting';
+  const outcome = runOutcome();
+  pill.className = 'pill ' + (outcome && outcome.kind !== 'done' ? outcome.kind : st?.status || '');
+  pill.textContent = outcome?.label || st?.status || 'starting';
   const tasks = st ? Object.values(st.tasks) : [];
   const done = tasks.filter(t => t.status === 'done').length;
-  $('progressV').textContent = tasks.length ? `${done} / ${tasks.length}` : '-';
+  $('progressV').textContent = tasks.length ? `${done} of ${tasks.length}` : '-';
   $('progressM').style.width = tasks.length ? (100 * done / tasks.length) + '%' : '0';
   $('progressM').style.background = 'var(--ok)';
   $('spendV').textContent = tokLine(st?.tokens);
   $('spendV').title = tokDetail(st?.tokens);
   $('bubble').textContent = knotSays();
+  renderBanner();
 }
+
+/**
+ * What became of the run, in words, and what can be done about it. `kind` drives the colours: done, attention (tasks
+ * got tangled), limit (stopped at a spending limit that an older plan carried), stopped (you stopped it), early.
+ */
+function runOutcome() {
+  const st = S.state;
+  if (!st || st.status === 'running') return null;
+  const tasks = Object.values(st.tasks);
+  const by = (x) => tasks.filter((t) => t.status === x);
+  const total = tasks.length;
+  const inBraid = by('done').length + by('replaced').length;
+  const name = (id) => S.plan?.tasks.find((t) => t.id === id)?.title || id;
+  const first = (t) => String(t.error || 'could not finish').split('\n')[0].slice(0, 120);
+  const failed = by('failed'), blocked = by('blocked'), skipped = by('skipped');
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const branch = st.integrationBranch;
+  if (st.status === 'done') {
+    return { kind: 'done', icon: '&#10003;', label: 'done', bubble: `All ${plural(total, 'strand')} braided. Review ${branch} and merge it when you're happy.`,
+      title: `All ${plural(total, 'strand')} are in the braid`, detail: `Review the work on <code>${esc(branch)}</code>, then merge it when you are happy with it.`, copy: `git merge ${branch}`, copyLabel: 'Copy merge command' };
+  }
+  if (failed.length) {
+    const why = failed.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>: ${esc(first(t))}`).join('<br>');
+    return { kind: 'attention', icon: '&#9888;', label: 'needs attention', bubble: `${plural(failed.length, 'strand')} got tangled. ${inBraid} of ${total} made it in.`,
+      title: `${plural(failed.length, 'strand')} got tangled`, detail: `${why}${failed.length > 2 ? `<br>and ${failed.length - 2} more.` : ''}${blocked.length ? `<br>${plural(blocked.length, 'task')} could not start because they depend on it.` : ''}<br>${inBraid} of ${total} strands are in the braid. Resume tries the tangled ones again.`, open: failed[0].id, openLabel: `See why: ${name(failed[0].id)}` };
+  }
+  if (skipped.some((t) => /budget exhausted/i.test(t.error || ''))) {
+    return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the spending limit. ${inBraid} of ${total} strands made it in.`,
+      title: 'Stopped: a spending limit was reached', detail: `This run was started with a spending limit (older versions of the start screen asked for one). ${inBraid} of ${total} strands are in the braid and ${plural(skipped.length, 'task')} never started. Resume carries on without a limit.` };
+  }
+  if (st.status === 'aborted' || skipped.some((t) => /aborted/i.test(t.error || ''))) {
+    return { kind: 'stopped', icon: '&#9208;', label: 'stopped', bubble: `Run stopped. ${inBraid} of ${total} strands made it in and are safe.`,
+      title: 'This run was stopped', detail: `${inBraid} of ${total} strands are in the braid, and everything merged is safe on <code>${esc(branch)}</code>. Resume picks up the rest.` };
+  }
+  return { kind: 'early', icon: '&#9208;', label: 'stopped early', bubble: `The run stopped early. ${inBraid} of ${total} strands made it in.`,
+    title: 'The run stopped early', detail: `${inBraid} of ${total} strands are in the braid. ${skipped.length ? `${plural(skipped.length, 'task')} never started. ` : ''}Resume tries the rest.` };
+}
+
+function renderBanner() {
+  const el = $('runBanner');
+  const o = runOutcome();
+  if (!el || !o || !S.runId) { if (el) el.hidden = true; return; }
+  const canResume = CTL.on && !CTL.active && o.kind !== 'done';
+  const actions = [];
+  if (canResume) actions.push('<button class="btn primary" data-b="resume">Resume</button>');
+  if (o.open) actions.push(`<button class="btn" data-b="open" data-task="${esc(o.open)}">${esc(o.openLabel)}</button>`);
+  if (o.copy) actions.push(`<button class="btn" data-b="copy" data-text="${esc(o.copy)}">${esc(o.copyLabel)}</button>`);
+  const hint = !canResume && o.kind !== 'done' && !CTL.on ? `<br>To continue, run <code>braid resume ${esc(S.runId)}</code> in a terminal.` : '';
+  el.className = 'banner ' + o.kind;
+  el.innerHTML = `<div class="b-ico" aria-hidden="true">${o.icon}</div><div class="b-text"><b>${esc(o.title)}</b><span>${o.detail}${hint}</span></div><div class="b-actions">${actions.join('')}</div>`;
+  el.hidden = false;
+}
+$('runBanner').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-b]'); if (!b) return;
+  if (b.dataset.b === 'resume') $('resumeBtn').click();
+  if (b.dataset.b === 'open') openInspector(b.dataset.task);
+  if (b.dataset.b === 'copy') { try { await navigator.clipboard.writeText(b.dataset.text); b.textContent = 'Copied'; } catch { b.textContent = b.dataset.text; } }
+});
 
 function knotSays() {
   const st = S.state;
   if (!st) return 'Warming up the loom...';
   const tasks = Object.values(st.tasks);
   const n = (s) => tasks.filter(t => t.status === s).length;
-  if (st.status === 'done') return `All ${tasks.length} strands braided. Review ${st.integrationBranch} and merge it when you're happy.`;
-  if (st.status === 'failed') return `Stopped with ${n('failed')} failed and ${n('blocked')} blocked. ${n('done')} strands still made it in.`;
-  if (st.status === 'aborted') return 'Run stopped. Merged work is safe on the integration branch.';
+  const outcome = runOutcome();
+  if (outcome) return outcome.bubble;
   const last = [...S.events].reverse().find(e => ['verify', 'review', 'merge', 'merge_reverted', 'sync', 'resolve'].includes(e.type));
   if (last?.type === 'verify' && last.code !== 0) return `${last.task} failed \`${last.cmd}\`. Sending it back with the output.`;
   if (last?.type === 'review' && !last.approve) return `Reviewer bounced ${last.task}: ${(last.issues || [])[0] || 'changes requested'}.`;
@@ -1129,6 +1215,10 @@ function renderControls() {
   $('newRunBtn').disabled = !idle;
   $('stopBtn').hidden = !(CTL.on && CTL.active && CTL.active === S.runId);
   $('resumeBtn').hidden = !(CTL.on && idle && S.runId && (st === 'failed' || st === 'aborted'));
+  // The obvious next step gets the strong button: Resume for a run that stopped, New run otherwise.
+  $('resumeBtn').classList.toggle('primary', !$('resumeBtn').hidden);
+  $('newRunBtn').classList.toggle('primary', $('resumeBtn').hidden);
+  renderBanner();
 }
 
 async function pollControl() {

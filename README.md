@@ -57,6 +57,16 @@ It shows:
 - **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
 - **Knot:** the mascot, which narrates what the run is doing.
 
+## Benchmark drivers and models
+
+```bash
+braid eval evals/suite.json --variants claude:sonnet,claude:opus --out results.json
+```
+
+Each case starts from a throwaway repo, runs its plan, then copies hidden acceptance tests onto the
+integration branch and runs them. It prints pass rate, spend, cost per passing case and time per
+variant. See [evals/suite.json](evals/suite.json) for the format. These runs spend real money.
+
 ## Plan format
 
 See [examples/plan.json](examples/plan.json). The fields are:

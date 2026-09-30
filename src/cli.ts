@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ClaudeDriver } from './drivers/claude.js';
 import { CodexDriver } from './drivers/codex.js';
 import { DriverRegistry } from './drivers/driver.js';
 import { MockDriver } from './drivers/mock.js';
 import { createDemoRun } from './demo.js';
+import { formatSummary, loadSuite, parseVariants, runEval, saveResults, summarize, variantLabel } from './eval.js';
 import { Git } from './git.js';
 import { Orchestrator } from './orchestrator.js';
 import { loadPlan } from './plan.js';
@@ -22,6 +23,8 @@ Usage:
   braid run <plan.json> [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
   braid resume [runId] [--concurrency N] [--budget USD] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
+  braid eval <suite.json> [--variants claude:sonnet,codex] [--out results.json]
+                                 benchmark drivers/models: pass rate, spend and time per variant
   braid watch [--port 4777]      live dashboard for this repo's runs
   braid demo  [--port 4777]      scripted mock run + dashboard, no agents, no spend
   braid status [runId]
@@ -103,6 +106,7 @@ async function main(argv: string[]): Promise<number> {
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
       port: { type: 'string' },
+      variants: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -123,6 +127,30 @@ async function main(argv: string[]): Promise<number> {
     console.log(`
 demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     await new Promise(() => undefined);
+  }
+
+  if (cmd === 'eval') {
+    if (!arg) throw new Error('eval needs a suite file');
+    const suite = await loadSuite(arg);
+    const variants = parseVariants(values.variants ?? values.driver ?? 'claude');
+    if (values.model && variants.length === 1) variants[0]!.model = values.model;
+    const ac = new AbortController();
+    process.on('SIGINT', () => ac.abort());
+    console.log(`eval ${suite.name}: ${suite.cases.length} case(s) x ${variants.map(variantLabel).join(', ')}`);
+    const results = await runEval({
+      suite,
+      suiteDir: dirname(resolve(arg)),
+      variants,
+      drivers: registry(),
+      signal: ac.signal,
+      onResult: (r) => console.log(`  ${r.pass ? 'PASS' : 'FAIL'}  ${r.variant}  ${r.caseId}  $${r.costUsd.toFixed(2)}  ${(r.wallMs / 1000).toFixed(1)}s${r.error ? `  ${r.error.slice(0, 140)}` : ''}`),
+    });
+    console.log(`\n${formatSummary(summarize(results))}`);
+    if (values.out) {
+      await saveResults(values.out, suite, results);
+      console.log(`\nwrote ${values.out}`);
+    }
+    return results.every((r) => r.pass) ? 0 : 2;
   }
 
   const repo = await Git.toplevel(process.cwd());

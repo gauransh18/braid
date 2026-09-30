@@ -6,7 +6,8 @@ import { shell } from './proc.js';
 import { readFile } from 'node:fs/promises';
 import { conflictPrompt, extractJson, replanPrompt, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
 import { newRunId, RunStore, stateRoot } from './store.js';
-import type { PlanSpec, RunState, TaskState, TaskStatus } from './types.js';
+import { addTokens } from './tokens.js';
+import type { AgentResult, PlanSpec, RunState, TaskState, TaskStatus } from './types.js';
 
 export interface OrchestratorOptions {
   repo: string;
@@ -123,7 +124,7 @@ export class Orchestrator {
     const all = Object.values(this.state.tasks);
     this.state.status = this.opts.signal?.aborted ? 'aborted' : all.every((t) => COMPLETE.includes(t.status)) ? 'done' : 'failed';
     this.state.endedAt = new Date().toISOString();
-    this.store.event('run_end', { status: this.state.status, costUsd: this.state.costUsd });
+    this.store.event('run_end', { status: this.state.status, costUsd: this.state.costUsd, tokens: this.state.tokens, costEstimated: this.state.costEstimated });
     await this.save();
     return this.state;
   }
@@ -153,7 +154,7 @@ export class Orchestrator {
         continue;
       }
       retry.push(id);
-      prev.tasks[id] = { id, status: 'pending', attempts: 0, costUsd: t?.costUsd ?? 0 };
+      prev.tasks[id] = { id, status: 'pending', attempts: 0, costUsd: t?.costUsd ?? 0, ...(t?.tokens ? { tokens: t.tokens } : {}) };
     }
     prev.status = 'running';
     delete prev.endedAt;
@@ -263,7 +264,7 @@ export class Orchestrator {
           signal: this.opts.signal,
           onEvent: this.store.agentLog(task.id, attempt, resolving ? 'resolver' : 'worker'),
         });
-        this.addCost(s, work.costUsd);
+        this.addUsage(s, work);
         s.sessionId = work.sessionId;
         s.summary = work.text.slice(0, 2000);
 
@@ -363,7 +364,7 @@ export class Orchestrator {
         signal: this.opts.signal,
         onEvent: this.store.agentLog(task.id, used + 1, 'replanner'),
       });
-      this.addCost(s, res.costUsd);
+      this.addUsage(s, res);
       if (!res.ok) return fail(`planner failed: ${res.text}`);
       const draft = extractJson<ReplanDraft>(res.text);
       if (!draft) return fail('planner returned no JSON');
@@ -390,9 +391,14 @@ export class Orchestrator {
     }
   }
 
-  private addCost(s: TaskState, usd: number): void {
-    s.costUsd += usd;
-    this.state.costUsd += usd;
+  private addUsage(s: TaskState, r: AgentResult): void {
+    s.costUsd += r.costUsd;
+    this.state.costUsd += r.costUsd;
+    if (r.tokens) {
+      s.tokens = addTokens(s.tokens, r.tokens);
+      this.state.tokens = addTokens(this.state.tokens, r.tokens);
+    }
+    if (r.costEstimated) this.state.costEstimated = true;
   }
 
   private async review(task: ResolvedTask, dir: string, forkPoint: string, attempt: number) {
@@ -408,7 +414,7 @@ export class Orchestrator {
       signal: this.opts.signal,
       onEvent: this.store.agentLog(task.id, attempt, 'reviewer'),
     });
-    this.addCost(s, res.costUsd);
+    this.addUsage(s, res);
     const verdict = extractJson<{ approve?: boolean; issues?: string[] }>(res.text);
     const out = {
       approve: res.ok && verdict?.approve === true,

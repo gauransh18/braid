@@ -85,6 +85,15 @@ containers (see the roadmap) for untrusted work.
    - **Signing.** macOS needs an Apple Developer ID ($99/yr) and notarization, or Gatekeeper blocks the app. Windows needs a code-signing certificate (for example Azure Trusted Signing, about $10/mo), or SmartScreen shows an "unknown publisher" warning. Both are needed before selling.
    - **Rules until then:** no native npm modules, bundle the fonts locally instead of loading Google Fonts, and keep the core usable as a library.
 
+## Tokens and cost
+
+Every agent call reports tokens, and braid shows them beside dollars in `braid run`, `braid status`,
+`braid runs` and the dashboard (per task and per run). Tokens are always what the CLI reported, split
+into fresh input (cache writes included), cached input and output. Dollars are exact for Claude, which
+reports them, and a list-price estimate for Codex and Gemini: the run is flagged `costEstimated`, and
+the CLI and dashboard prefix those figures with `~`. If the tokens look wrong, that is the number to trust
+over the dollars. Claude's cache-heavy usage means a trivial prompt can show tens of thousands of tokens, mostly cached.
+
 ## Cost estimates
 
 Claude reports dollars. Codex and Gemini report only tokens, so `src/pricing.ts` turns tokens into an

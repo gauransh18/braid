@@ -70,7 +70,7 @@ function transcript(task: string, retry: boolean): AgentEvent[] {
 function script(): (o: DriverRunOptions) => MockStep {
   const calls = new Map<string, number>();
   const rand = (a: number, b: number) => a + Math.random() * (b - a);
-  return (o) => {
+  const step = (o: DriverRunOptions): MockStep => {
     const task = taskOf(o);
     const key = `${o.canEdit ? 'w' : 'r'}:${task}`;
     const n = (calls.get(key) ?? 0) + 1;
@@ -117,6 +117,12 @@ function script(): (o: DriverRunOptions) => MockStep {
       files['shared.txt'] = `${current}${task}\n`;
     }
     return { delayMs: rand(5000, 9000), costUsd: cost, files, events: transcript(task, n > 1), text: `Implemented ${task}.` };
+  };
+  // Scripted numbers standing in for a real agent's usage: tokens roughly proportional to the fake cost.
+  return (o) => {
+    const res = step(o);
+    const k = Math.round(((res.costUsd ?? 0) / 0.1) * 40_000);
+    return { ...res, tokens: { input: Math.round(k * 0.15), cached: Math.round(k * 0.75), output: Math.round(k * 0.1) } };
   };
 }
 

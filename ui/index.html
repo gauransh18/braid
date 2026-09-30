@@ -140,7 +140,7 @@ svg.threads path.dim { opacity: .18; }
 .desk canvas { width: 56px; height: 56px; grid-row: span 3; }
 .desk .t { font-weight: 600; font-size: 13.5px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk .id { font-size: 12px; color: var(--muted); }
-.desk .row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.desk .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); }
 .desk::after {
   content: ""; position: absolute; left: -2px; top: 12px; bottom: 12px; width: 4px; border-radius: 0 3px 3px 0; background: var(--tc);
 }
@@ -156,7 +156,7 @@ svg.threads path.dim { opacity: .18; }
 .dots i { width: 7px; height: 7px; border-radius: 2px; background: var(--line-2); }
 .dots i.used { background: var(--tc); }
 .dots i.bad { background: var(--err); }
-.cost { margin-left: auto; font-variant-numeric: tabular-nums; }
+.cost { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* ---------- side: braid + feed ---------- */
 .side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
@@ -247,7 +247,7 @@ svg.threads path.dim { opacity: .18; }
     <select class="select" id="runPick" aria-label="Run"></select>
     <span class="pill" id="runStatus">-</span>
     <div class="stat"><span class="k">Merged</span><span class="v" id="progressV">-</span><div class="meter"><i id="progressM"></i></div></div>
-    <div class="stat"><span class="k">Spend</span><span class="v" id="spendV">-</span><div class="meter" id="spendMeter"><i id="spendM"></i></div></div>
+    <div class="stat"><span class="k">Spend</span><span class="v" id="spendV">-</span><span class="sub mono" id="tokV" title=""></span><div class="meter" id="spendMeter"><i id="spendM"></i></div></div>
     <div class="stat"><span class="k">Elapsed</span><span class="v" id="elapsedV">-</span></div>
     <button class="icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle theme">&#9680;</button>
   </div>
@@ -400,6 +400,12 @@ setInterval(() => { if (!reduced) frame++; renderSprites(); }, 125);
 
 /* ================= state ================= */
 const $ = (id) => document.getElementById(id);
+/* Tokens are what the agent CLI reported. Dollars are exact for Claude and a list-price estimate (~) for Codex and Gemini. */
+const tokTotal = (t) => t ? (t.input || 0) + (t.cached || 0) + (t.output || 0) : 0;
+const fmtTok = (n) => n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 2 : 1).replace(/\.?0+$/, '') + 'k' : (n / 1e6).toFixed(2) + 'M';
+const fmtUsd = (usd, est) => (est ? '~' : '') + '$' + (usd || 0).toFixed(2);
+const tokLine = (t) => tokTotal(t) ? `${fmtTok(tokTotal(t))} tok` : '-';
+const tokDetail = (t) => tokTotal(t) ? `${fmtTok(t.input)} fresh, ${fmtTok(t.cached)} cached, ${fmtTok(t.output)} out` : 'no token data';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const S = { runs: [], runId: null, plan: null, state: null, events: [], es: null, selected: null, logTimer: null, logTab: null, color: {} };
 
@@ -431,7 +437,7 @@ async function loadRuns() {
 function fmtRunLabel(r) {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(r.runId);
   const when = m ? `${m[2]}/${m[3]} ${m[4]}:${m[5]}` : r.runId;
-  return `${when} - ${r.status} - $${(r.costUsd || 0).toFixed(2)}`;
+  return `${when} - ${r.status} - ${fmtUsd(r.costUsd, r.costEstimated)}`;
 }
 
 async function openRun(id) {
@@ -535,7 +541,9 @@ function renderHeader() {
   $('progressM').style.width = tasks.length ? (100 * done / tasks.length) + '%' : '0';
   $('progressM').style.background = 'var(--ok)';
   const spend = st?.costUsd || 0, budget = S.plan?.budgetUsd;
-  $('spendV').textContent = budget ? `$${spend.toFixed(2)} / $${budget}` : `$${spend.toFixed(2)}`;
+  $('spendV').textContent = budget ? `${fmtUsd(spend, st?.costEstimated)} / $${budget}` : fmtUsd(spend, st?.costEstimated);
+  $('tokV').textContent = tokLine(st?.tokens);
+  $('tokV').title = tokDetail(st?.tokens) + (st?.costEstimated ? '. Dollars are estimated from tokens at list prices.' : '');
   $('spendM').style.width = budget ? Math.min(100, 100 * spend / budget) + '%' : '0';
   $('spendMeter').classList.toggle('hot', !!budget && spend / budget > .8);
   $('bubble').textContent = knotSays();
@@ -608,7 +616,9 @@ function updateFloor() {
       return `<i class="${bad ? 'bad' : used ? 'used' : ''}"></i>`;
     }).join('');
     el.querySelector('[data-dots]').title = `attempt ${s.attempts} of ${max}`;
-    el.querySelector('[data-cost]').textContent = '$' + (s.costUsd || 0).toFixed(2);
+    const costEl = el.querySelector('[data-cost]');
+    costEl.textContent = (tokTotal(s.tokens) ? tokLine(s.tokens) + ' · ' : '') + fmtUsd(s.costUsd, S.state.costEstimated);
+    costEl.title = tokDetail(s.tokens);
     el.classList.toggle('sel', S.selected === t.id);
     el.setAttribute('aria-label', `${t.title || t.id}: ${s.status}, attempt ${s.attempts} of ${max}`);
   }
@@ -701,7 +711,7 @@ function renderBraid() {
 
 const EV_TEXT = {
   run_start: (e) => [`Run started from ${e.base}`, ''],
-  run_end: (e) => [`Run ${e.status}, $${Number(e.costUsd || 0).toFixed(2)} spent`, e.status === 'done' ? 'ok' : 'err'],
+  run_end: (e) => [`Run ${e.status}, ${tokTotal(e.tokens) ? tokLine(e.tokens) + ', ' : ''}${fmtUsd(Number(e.costUsd || 0), e.costEstimated)} spent`, e.status === 'done' ? 'ok' : 'err'],
   task_status: (e) => [`${e.status}${e.error ? ': ' + String(e.error).split('\n')[0].slice(0, 90) : ''}`, e.status === 'done' ? 'ok' : e.status === 'failed' ? 'err' : ''],
   verify: (e) => [`verify ${e.dir}: ${e.cmd} ${e.code === 0 ? 'passed' : 'failed (' + e.code + ')'}`, e.code === 0 ? '' : 'err'],
   review: (e) => [e.approve ? 'review approved' : `review: ${(e.issues || []).join('; ').slice(0, 120)}`, e.approve ? 'ok' : 'err'],
@@ -765,7 +775,7 @@ function renderInspector(full) {
   const s = S.state.tasks[id] || {};
   $('insTitle').textContent = t.title || id;
   $('insMeta').innerHTML = `<span class="chip ${s.status}">${esc(s.status)}</span>
-    <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono">$${(s.costUsd || 0).toFixed(2)}</span>
+    <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono" title="${esc(tokDetail(s.tokens))}">${esc(tokLine(s.tokens))} · ${fmtUsd(s.costUsd, S.state?.costEstimated)}</span>
     ${(t.deps || []).length ? `<span>needs ${t.deps.map(d => `<b style="color:${colorOf(d)}">${esc(d)}</b>`).join(', ')}</span>` : ''}`;
   if (full || !$('insChecks')) {
     $('insBody').innerHTML = `
@@ -798,7 +808,7 @@ function renderLogs() {
       case 'text': return `<div class="msg">${esc(e.text)}</div>`;
       case 'tool': return `<div class="tool"><b>${esc(e.name)}</b><code class="mono">${esc(summarizeInput(e.input))}</code></div>`;
       case 'tool_result': return `<div class="res mono ${e.isError ? 'bad' : ''}">${esc(e.preview)}</div>`;
-      case 'result': return `<div class="result ${e.ok ? 'ok' : 'bad'}"><b>${e.ok ? 'Finished' : 'Ended with error'}</b>${e.costUsd ? ` - $${Number(e.costUsd).toFixed(2)}` : ''}\n${esc(String(e.text || '').slice(0, 1200))}</div>`;
+      case 'result': return `<div class="result ${e.ok ? 'ok' : 'bad'}"><b>${e.ok ? 'Finished' : 'Ended with error'}</b>${e.costUsd || tokTotal(e.tokens) ? ` - ${tokTotal(e.tokens) ? tokLine(e.tokens) + ', ' : ''}${fmtUsd(Number(e.costUsd), e.costEstimated)}` : ''}\n${esc(String(e.text || '').slice(0, 1200))}</div>`;
       default: return '';
     }
   }).join('');

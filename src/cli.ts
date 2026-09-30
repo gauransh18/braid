@@ -11,6 +11,7 @@ import { createDemoRun } from './demo.js';
 import { formatSummary, loadSuite, parseVariants, runEval, saveResults, summarize, variantLabel } from './eval.js';
 import { Git } from './git.js';
 import { Orchestrator } from './orchestrator.js';
+import { describeTokens, formatCost } from './tokens.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
 import { RunStore, stateRoot, type HarnessEvent } from './store.js';
@@ -73,16 +74,18 @@ function printEvent(e: HarnessEvent): void {
       console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
       break;
     case 'run_end':
-      console.log(`${t} run ${e.status}; spend $${Number(e.costUsd).toFixed(2)}`);
+      console.log(`${t} run ${e.status}; ${describeTokens(e.tokens as never, false)}, ${formatCost(Number(e.costUsd), e.costEstimated as boolean | undefined)}`);
       break;
   }
 }
 
 function printState(s: RunState): void {
-  console.log(`run ${s.runId}: ${s.status}  base=${s.base}  integration=${s.integrationBranch}  spend=$${s.costUsd.toFixed(2)}`);
+  console.log(`run ${s.runId}: ${s.status}  base=${s.base}  integration=${s.integrationBranch}`);
+  console.log(`  tokens: ${describeTokens(s.tokens)}`);
+  console.log(`  spend:  ${formatCost(s.costUsd, s.costEstimated)}${s.costEstimated ? '  (estimated from tokens at list prices)' : ''}`);
   for (const t of Object.values(s.tasks)) {
     const err = t.error ? `  ${t.error.split('\n')[0]!.slice(0, 120)}` : '';
-    console.log(`  ${t.id.padEnd(24)} ${t.status.padEnd(10)} attempts=${t.attempts} $${t.costUsd.toFixed(2)}${err}`);
+    console.log(`  ${t.id.padEnd(24)} ${t.status.padEnd(10)} attempts=${t.attempts} ${describeTokens(t.tokens, false).padEnd(10)} ${formatCost(t.costUsd, s.costEstimated)}${err}`);
   }
 }
 
@@ -230,7 +233,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
   if (cmd === 'runs') {
     for (const id of await RunStore.listRuns(repo)) {
       const s = await RunStore.loadState(repo, id).catch(() => null);
-      console.log(`${id}  ${s?.status ?? 'unknown'}  $${(s?.costUsd ?? 0).toFixed(2)}`);
+      console.log(`${id}  ${s?.status ?? 'unknown'}  ${describeTokens(s?.tokens, false)}  ${formatCost(s?.costUsd ?? 0, s?.costEstimated)}`);
     }
     return 0;
   }

@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentResult } from '../types.js';
-import { DRIVER_DEFAULT_MODEL, estimateCostUsd, type Usage } from '../pricing.js';
+import { DRIVER_DEFAULT_MODEL, estimateCostUsd, sumUsage, type Usage } from '../pricing.js';
 import { streamLines } from '../proc.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
@@ -96,7 +96,7 @@ export class GeminiStreamParser {
   finish(exitCode: number, stderr: string): AgentResult {
     const ok = exitCode === 0 && this.status === 'success';
     const text = ok ? this.answer.trim() : [this.answer.trim(), this.errorText.trim(), stderr.trim().slice(-1500)].filter(Boolean).join('\n');
-    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: estimateCostUsd(this.usage, this.requestedModel ?? DRIVER_DEFAULT_MODEL.gemini), sessionId: this.sessionId };
+    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: estimateCostUsd(this.usage, this.requestedModel ?? DRIVER_DEFAULT_MODEL.gemini), tokens: sumUsage(this.usage), costEstimated: true, sessionId: this.sessionId };
   }
 }
 

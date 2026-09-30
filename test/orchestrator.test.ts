@@ -418,4 +418,15 @@ describe('orchestrator', () => {
       assert.deepEqual(mock.calls.map(taskOf).sort(), ['big-2', 'last']);
     });
   });
+
+  it('sums tokens per task and per run', async () => {
+    const repo = await makeRepo();
+    const plan: PlanSpec = { goal: 'g', driver: 'mock', review: true, tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
+    const drivers = () => new DriverRegistry().register(new MockDriver((o): MockStep => ({ files: o.canEdit ? { 'a.txt': 'a' } : undefined, tokens: { input: 100, cached: 400, output: 50 } })));
+    const s1 = await new Orchestrator({ repo, plan, drivers: drivers() }).run();
+    // worker + reviewer
+    assert.deepEqual(s1.tasks.a!.tokens, { input: 200, cached: 800, output: 100 });
+    assert.deepEqual(s1.tokens, s1.tasks.a!.tokens);
+    assert.equal(s1.costEstimated, undefined, 'mock results carry no estimate flag');
+  });
 });

@@ -58,11 +58,23 @@ export type TaskStatus =
   /** Failed for good, then swapped for new tasks by the planner. Counts as complete for the run. */
   | 'replaced';
 
+/**
+ * Tokens as the agent CLI reported them, split by how they are billed.
+ * `input` is fresh input (cache writes included), `cached` is input served from cache, `output` is generated text.
+ */
+export interface TokenUsage {
+  input: number;
+  cached: number;
+  output: number;
+}
+
 export interface TaskState {
   id: string;
   status: TaskStatus;
   attempts: number;
   costUsd: number;
+  /** Tokens across all of this task's agent calls (worker, resolver, reviewer, planner). */
+  tokens?: TokenUsage;
   branch?: string;
   sessionId?: string;
   summary?: string;
@@ -83,6 +95,9 @@ export interface RunState {
   integrationBranch: string;
   status: 'running' | 'done' | 'failed' | 'aborted';
   costUsd: number;
+  tokens?: TokenUsage;
+  /** True when `costUsd` includes a list-price estimate (Codex, Gemini) rather than a figure the CLI reported. Tokens are always as reported. */
+  costEstimated?: boolean;
   createdAt: string;
   endedAt?: string;
   /** Integration head after the last verified merge. Resume rewinds to it, dropping any half-done merge. */
@@ -101,12 +116,15 @@ export type AgentEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; input: unknown }
   | { kind: 'tool_result'; isError: boolean; preview: string }
-  | { kind: 'result'; ok: boolean; text: string; costUsd: number; sessionId?: string; turns?: number }
+  | { kind: 'result'; ok: boolean; text: string; costUsd: number; tokens?: TokenUsage; costEstimated?: boolean; sessionId?: string; turns?: number }
   | { kind: 'raw'; line: string };
 
 export interface AgentResult {
   ok: boolean;
   text: string;
   costUsd: number;
+  tokens?: TokenUsage;
+  /** `costUsd` was computed from tokens and list prices, not reported by the CLI. */
+  costEstimated?: boolean;
   sessionId?: string;
 }

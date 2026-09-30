@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentResult } from '../types.js';
 import { streamLines } from '../proc.js';
+import type { TokenUsage } from '../types.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
 const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'MultiEdit'];
@@ -36,7 +37,7 @@ export class ClaudeDriver implements Driver {
       { cwd: opts.cwd, input: opts.prompt, signal: opts.signal },
       (line) => {
         for (const e of parseClaudeLine(line)) {
-          if (e.kind === 'result') result = { ok: e.ok, text: e.text, costUsd: e.costUsd, sessionId: e.sessionId };
+          if (e.kind === 'result') result = { ok: e.ok, text: e.text, costUsd: e.costUsd, tokens: e.tokens, sessionId: e.sessionId };
           emit(e);
         }
       },
@@ -84,6 +85,7 @@ export function parseClaudeLine(line: string): AgentEvent[] {
           ok: msg.subtype === 'success' && !msg.is_error,
           text: typeof msg.result === 'string' ? msg.result : String(msg.subtype ?? ''),
           costUsd: Number(msg.total_cost_usd ?? 0),
+          tokens: claudeTokens(msg.usage),
           sessionId: msg.session_id,
           turns: msg.num_turns,
         },
@@ -91,4 +93,14 @@ export function parseClaudeLine(line: string): AgentEvent[] {
     default:
       return [];
   }
+}
+
+/** Claude bills cache writes like fresh input, so they count as `input`; cache reads are `cached`. */
+export function claudeTokens(usage: any): TokenUsage | undefined {
+  if (!usage || typeof usage !== 'object') return undefined;
+  return {
+    input: Number(usage.input_tokens ?? 0) + Number(usage.cache_creation_input_tokens ?? 0),
+    cached: Number(usage.cache_read_input_tokens ?? 0),
+    output: Number(usage.output_tokens ?? 0),
+  };
 }

@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentResult } from '../types.js';
-import { DRIVER_DEFAULT_MODEL, estimateCostUsd, type Usage } from '../pricing.js';
+import { DRIVER_DEFAULT_MODEL, estimateCostUsd, sumUsage, type Usage } from '../pricing.js';
 import { streamLines } from '../proc.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
@@ -58,7 +58,8 @@ export class CodexDriver implements Driver {
     const text = ok ? lastText : `${lastText}\n${stderr.trim().slice(-2000)}`.trim();
     // Codex reports tokens, not dollars; spend is estimated from list prices (see pricing.ts).
     const costUsd = estimateCostUsd(usage, DRIVER_DEFAULT_MODEL.codex);
-    emit({ kind: 'result', ok, text, costUsd });
-    return { ok, text, costUsd };
+    const tokens = sumUsage(usage);
+    emit({ kind: 'result', ok, text, costUsd, tokens, costEstimated: true });
+    return { ok, text, costUsd, tokens, costEstimated: true };
   }
 }

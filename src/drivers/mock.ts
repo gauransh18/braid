@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AgentEvent, AgentResult } from '../types.js';
+import type { AgentEvent, AgentResult, TokenUsage } from '../types.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
 export interface MockStep {
@@ -10,6 +10,7 @@ export interface MockStep {
   text?: string;
   ok?: boolean;
   costUsd?: number;
+  tokens?: TokenUsage;
   /** Transcript events to emit before finishing (demo mode). */
   events?: AgentEvent[];
   /** Total simulated run time, spread across the events. */
@@ -46,7 +47,7 @@ export class MockDriver implements Driver {
       }
     }
     const text = step.text ?? '{"approve": true, "issues": []}';
-    const res = { ok: step.ok ?? true, text, costUsd: step.costUsd ?? 0 };
+    const res = { ok: step.ok ?? true, text, costUsd: step.costUsd ?? 0, ...(step.tokens ? { tokens: step.tokens } : {}) };
     opts.onEvent?.({ kind: 'result', ...res });
     return res;
   }

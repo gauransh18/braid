@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { GeminiDriver, GeminiStreamParser } from '../src/drivers/gemini.js';
-import { ClaudeDriver, parseClaudeLine } from '../src/drivers/claude.js';
+import { addTokens, describeTokens, formatCost, formatTokens } from '../src/tokens.js';
+import { ClaudeDriver, claudeTokens, parseClaudeLine } from '../src/drivers/claude.js';
 import { estimateCostUsd, priceFor } from '../src/pricing.js';
 import { validatePlan } from '../src/plan.js';
 import { extractJson } from '../src/prompts.js';
@@ -35,7 +36,7 @@ describe('claude driver', () => {
       ],
     );
     const [r] = parseClaudeLine('{"type":"result","subtype":"success","is_error":false,"result":"done","total_cost_usd":0.25,"session_id":"s1","num_turns":3}');
-    assert.deepEqual(r, { kind: 'result', ok: true, text: 'done', costUsd: 0.25, sessionId: 's1', turns: 3 });
+    assert.deepEqual(r, { kind: 'result', ok: true, text: 'done', costUsd: 0.25, tokens: undefined, sessionId: 's1', turns: 3 });
     assert.equal(parseClaudeLine('{"type":"system","subtype":"hook_started"}').length, 0);
   });
 
@@ -89,7 +90,7 @@ describe('gemini driver', () => {
       { type: 'result', status: 'success', stats: {} },
     ]);
     assert.deepEqual(events.map((e) => e.kind), ['start', 'text', 'tool', 'tool_result', 'text', 'text']);
-    assert.deepEqual(res, { ok: true, text: 'All done.', costUsd: 0, sessionId: 's1' }, 'no stats, so no estimate');
+    assert.deepEqual(res, { ok: true, text: 'All done.', costUsd: 0, tokens: { input: 0, cached: 0, output: 0 }, costEstimated: true, sessionId: 's1' }, 'no stats: zero tokens, still flagged as an estimate');
   });
 
   it('reports failure from an error result or a missing result', () => {
@@ -123,5 +124,34 @@ describe('pricing', () => {
     p.feed(JSON.stringify({ type: 'result', status: 'success', stats: { models: { 'gemini-2.5-flash': { input_tokens: 2_000_000, cached: 1_000_000, input: 1_000_000, output_tokens: 1_000_000 } } } }));
     // 1M fresh @0.30 + 1M cached @0.03 + 1M out @2.50
     assert.ok(Math.abs(p.finish(0, '').costUsd - 2.83) < 1e-9);
+  });
+});
+
+describe('tokens', () => {
+  it('maps Claude usage: cache writes are fresh input, cache reads are cached', () => {
+    assert.deepEqual(claudeTokens({ input_tokens: 2, cache_creation_input_tokens: 6356, cache_read_input_tokens: 21442, output_tokens: 4 }), { input: 6358, cached: 21442, output: 4 });
+    assert.equal(claudeTokens(undefined), undefined);
+    const [r] = parseClaudeLine('{"type":"result","subtype":"success","result":"x","total_cost_usd":0.05,"usage":{"input_tokens":10,"cache_read_input_tokens":90,"output_tokens":5}}');
+    assert.deepEqual((r as { tokens?: unknown }).tokens, { input: 10, cached: 90, output: 5 });
+  });
+
+  it('formats counts and marks estimated dollars', () => {
+    assert.equal(formatTokens(950), '950');
+    assert.equal(formatTokens(12_340), '12.3k');
+    assert.equal(formatTokens(4_560_000), '4.56M');
+    assert.equal(formatCost(0.1234, true), '~$0.12');
+    assert.equal(formatCost(0.1234), '$0.12');
+    assert.equal(describeTokens({ input: 1000, cached: 2000, output: 500 }), '3.5k tok (fresh 1k, cached 2k, out 500)');
+    assert.equal(describeTokens(undefined), '-');
+    assert.deepEqual(addTokens({ input: 1, cached: 2, output: 3 }, undefined), { input: 1, cached: 2, output: 3 });
+  });
+
+  it('gemini reports tokens and flags its dollars as estimated', () => {
+    const p = new GeminiStreamParser('gemini-2.5-flash');
+    p.feed(JSON.stringify({ type: 'init', session_id: 's', model: 'gemini-2.5-flash' }));
+    p.feed(JSON.stringify({ type: 'result', status: 'success', stats: { models: { 'gemini-2.5-flash': { input_tokens: 300, cached: 100, input: 200, output_tokens: 50 } } } }));
+    const r = p.finish(0, '');
+    assert.deepEqual(r.tokens, { input: 200, cached: 100, output: 50 });
+    assert.equal(r.costEstimated, true);
   });
 });

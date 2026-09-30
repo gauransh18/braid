@@ -53,6 +53,7 @@ It shows:
 
 - **The floor:** each agent is a pixel blob at a desk. Its mood follows its task: asleep while pending, typing while running, a magnifier while verifying, glasses while reviewing, jumping while merging, happy when done, flattened when failed, tied up when blocked. The lines between desks are dependencies.
 - **The braid:** the integration branch drawn as a rope that gains a strand in the task's color on every verified merge.
+- **Usage:** tokens (fresh, cached, output) and spend per task and per run. Dollars show as `~$` when they are estimated from tokens (Codex, Gemini) rather than reported.
 - **Activity:** every harness event (verify results, review verdicts, conflicts, rollbacks).
 - **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
 - **Knot:** the mascot, which narrates what the run is doing.

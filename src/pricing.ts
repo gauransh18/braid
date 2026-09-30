@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { TokenUsage } from './types.js';
 
 /** USD per 1M tokens. */
 export interface Price {
@@ -75,4 +76,8 @@ export function estimateCostUsd(usages: Usage[], fallbackModel?: string): number
     usd += (u.input * p.input + (u.cached ?? 0) * (p.cachedInput ?? p.input) + u.output * p.output) / 1_000_000;
   }
   return usd;
+}
+
+export function sumUsage(usages: Usage[]): TokenUsage {
+  return usages.reduce<TokenUsage>((t, u) => ({ input: t.input + u.input, cached: t.cached + (u.cached ?? 0), output: t.output + u.output }), { input: 0, cached: 0, output: 0 });
 }

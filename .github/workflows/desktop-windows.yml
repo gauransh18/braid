@@ -1,0 +1,31 @@
+# Builds the Windows desktop app (NSIS installer), installs it on a real Windows machine, launches it on a test
+# repository and checks the window and background server. Uploads the installer and a screenshot.
+name: desktop-windows
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop/src-tauri }
+      - run: npm ci
+      - run: npm run build:desktop
+      - name: Install and launch the app
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
+          pwsh scripts/smoke-desktop-windows.ps1 -Installer $setup
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-desktop
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop-windows.png

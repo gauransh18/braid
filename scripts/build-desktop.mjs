@@ -32,4 +32,9 @@ const dest = join(root, 'desktop', 'src-tauri', 'binaries');
 mkdirSync(dest, { recursive: true });
 copyFileSync(join(root, 'dist', 'bin', `braid-${bunTarget}${ext}`), join(dest, `braid-${host}${ext}`));
 
-run('cargo', ['tauri', 'build', ...(process.argv.includes('--debug') ? ['--debug'] : [])], join(root, 'desktop', 'src-tauri'));
+// Prefer an installed `cargo tauri`; otherwise fetch the prebuilt CLI from npm, which is much faster than compiling it (CI).
+const haveCargoTauri = spawnSync('cargo', ['tauri', '--version'], { stdio: 'ignore', shell: process.platform === 'win32' }).status === 0;
+const tauri = haveCargoTauri ? ['cargo', 'tauri'] : ['npx', '--yes', '@tauri-apps/cli@^2'];
+// On Windows build the NSIS installer only: the MSI needs the WiX toolset downloaded, and one installer is enough.
+const bundles = process.platform === 'win32' ? ['--bundles', 'nsis'] : [];
+run(tauri[0], [...tauri.slice(1), 'build', ...bundles, ...(process.argv.includes('--debug') ? ['--debug'] : [])], join(root, 'desktop', 'src-tauri'));

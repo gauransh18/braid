@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { spawnable } from './spawn.js';
 import type { SandboxSpec } from './types.js';
 
 /** A command line about to be spawned; a sandbox rewrites it to run inside a container. */
@@ -98,7 +99,8 @@ export class Sandbox {
 
 function probe(bin: string, args: string[]): Promise<{ code: number; stderr: string; missing: boolean }> {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { windowsHide: true });
+    const run = spawnable(bin, args);
+    const child = spawn(run.cmd, run.args, { windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments });
     let stderr = '';
     child.stderr.on('data', (d) => (stderr += d));
     child.on('error', () => resolve({ code: 1, stderr, missing: true }));

@@ -1,3 +1,5 @@
+import { findExecutable } from './spawn.js';
+
 /**
  * Live model lists and connection tests for the providers that have an API. The desktop app runs these through
  * the bundled binary (`braid models`, `braid test-provider`), handing it the key in the environment, so the
@@ -251,20 +253,17 @@ const SCAN: Partial<Record<Provider, RegExp>> = {
 };
 
 async function findProgram(name: string, env: Env): Promise<string | null> {
-  const { access, realpath } = await import('node:fs/promises');
-  const { constants } = await import('node:fs');
-  const { delimiter, isAbsolute, join } = await import('node:path');
+  const { realpath } = await import('node:fs/promises');
+  const { isAbsolute } = await import('node:path');
   const override = env[CLI_BIN[Object.keys(CLI_BIN).find((k) => CLI_BIN[k as Provider]!.name === name) as Provider]!.env];
-  const candidates = override && isAbsolute(override) ? [override] : (env.PATH ?? '').split(delimiter).filter(Boolean).map((d) => join(d, name));
-  for (const c of candidates) {
-    try {
-      await access(c, constants.X_OK);
-      return await realpath(c);
-    } catch {
-      /* next */
-    }
+  // PATHEXT-aware on Windows (claude.cmd, gemini.cmd), plain PATH lookup elsewhere.
+  const found = override && isAbsolute(override) ? override : findExecutable(name, { env });
+  if (!found) return null;
+  try {
+    return await realpath(found);
+  } catch {
+    return found;
   }
-  return null;
 }
 
 /** Read a file in pieces and collect regex matches, without holding a 200 MB program in memory. */

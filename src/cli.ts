@@ -146,7 +146,8 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, arg] = positionals;
   if (values.help || !cmd) {
     console.log(USAGE);
-    return cmd ? 0 : 1;
+    // Asking for help is not an error; running with nothing to do is.
+    return values.help ? 0 : 1;
   }
   const port = values.port ? Number(values.port) : undefined;
 

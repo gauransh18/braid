@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { CommandSpec, Wrap } from './sandbox.js';
+import { spawnable } from './spawn.js';
 
 export interface ExecResult {
   code: number;
@@ -15,7 +16,8 @@ export async function exec(
   opts: { cwd: string; allowFail?: boolean; input?: string } ,
 ): Promise<ExecResult> {
   const res = await new Promise<ExecResult>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, windowsHide: true });
+    const run = spawnable(cmd, args);
+    const child = spawn(run.cmd, run.args, { cwd: opts.cwd, windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d));
@@ -65,8 +67,10 @@ export async function streamLines(
   opts: { cwd: string; input: string; signal?: AbortSignal; env?: NodeJS.ProcessEnv; wrap?: Wrap },
   onLine: (line: string) => void,
 ): Promise<{ code: number; stderr: string }> {
-  const run = opts.wrap ? opts.wrap({ cmd, args }) : { cmd, args };
+  const wrapped = opts.wrap ? opts.wrap({ cmd, args }) : { cmd, args };
+  const run = spawnable(wrapped.cmd, wrapped.args);
   const child = spawn(run.cmd, run.args, {
+    windowsVerbatimArguments: run.windowsVerbatimArguments,
     cwd: opts.cwd,
     windowsHide: true,
     env: opts.env ?? process.env,

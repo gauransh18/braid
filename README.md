@@ -52,7 +52,7 @@ braid resume [runId] --budget 10   # defaults to the newest unfinished run
 
 `npm run build:desktop` builds `Braid.app` and a `.dmg` (about 30 MB) with [Tauri](https://tauri.app): a native
 window around the dashboard, with the single-file braid executable running in the background. It asks you to pick a
-git repository on first launch (and remembers it), and `Repository > Open Repository...` (Cmd+O) switches. Quitting
+git repository on first launch (and remembers it). **File > Open Repository...** (Cmd+O) switches the current window to another repository, and **File > New Window** (Cmd+N) opens another window with its own repository and its own background server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu. `Braid --repo PATH --repo PATH2` opens one window per repository. Quitting
 stops the background process. Closing the window keeps braid in the menu bar: the tray icon shows how many runs are active, its menu shows the window or switches repository, and **Quit Braid** really quits. macOS notifications announce a finished, failed or stopped run and each task that fails, but only while the window is not focused (the first launch asks for notification permission). Needs Rust, Bun and the Tauri CLI (`cargo install tauri-cli --version "^2" --locked`).
 Output is in `desktop/src-tauri/target/release/bundle/`. The app is unsigned, so macOS will warn on other people's
 machines. Starting runs from the window is not built yet; start them with `braid run` and the window shows them live.

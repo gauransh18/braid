@@ -7,20 +7,11 @@
     "frontendDist": "../ui"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "braid",
-        "width": 1240,
-        "height": 820,
-        "minWidth": 720,
-        "minHeight": 520,
-        "url": "index.html"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
-    }
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,

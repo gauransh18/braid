@@ -1,5 +1,6 @@
-// Desktop window for braid. The window shows the dashboard served by the bundled `braid` executable,
-// which runs in the background as `braid watch` inside the repository you pick.
+// Desktop app for braid. A small launcher offers the ways in (open a repository, recent repositories, a demo);
+// each repository then gets a dashboard window served by the bundled `braid` executable, which runs in the
+// background as `braid watch` inside that repository.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
@@ -47,23 +48,31 @@ struct TrayState {
     tray: TrayIcon<Wry>,
 }
 
-fn config_file(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("repo.txt"))
+const LAUNCHER: &str = "launcher";
+const MAX_RECENT: usize = 8;
+
+fn recent_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("recent.json"))
 }
 
-fn saved_repo(app: &AppHandle) -> Option<PathBuf> {
-    let text = fs::read_to_string(config_file(app)?).ok()?;
-    let path = PathBuf::from(text.trim());
-    path.is_dir().then_some(path)
+/// Repositories opened before, newest first. Folders that no longer exist are dropped.
+fn load_recent(app: &AppHandle) -> Vec<PathBuf> {
+    let Some(text) = recent_file(app).and_then(|f| fs::read_to_string(f).ok()) else { return Vec::new() };
+    let list: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
+    list.into_iter().map(PathBuf::from).filter(|p| p.is_dir()).collect()
 }
 
-fn save_repo(app: &AppHandle, repo: &Path) {
-    if let Some(file) = config_file(app) {
-        if let Some(dir) = file.parent() {
-            let _ = fs::create_dir_all(dir);
-        }
-        let _ = fs::write(file, repo.to_string_lossy().as_bytes());
+fn remember_repo(app: &AppHandle, repo: &Path) {
+    let Some(file) = recent_file(app) else { return };
+    let mut list = load_recent(app);
+    list.retain(|p| p != repo);
+    list.insert(0, repo.to_path_buf());
+    list.truncate(MAX_RECENT);
+    if let Some(dir) = file.parent() {
+        let _ = fs::create_dir_all(dir);
     }
+    let names: Vec<String> = list.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let _ = fs::write(file, serde_json::to_string(&names).unwrap_or_default());
 }
 
 /// 192 random bits as hex. The page uses it to authorize start/stop/resume requests to the local server.
@@ -90,21 +99,17 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
     false
 }
 
-/// Start `braid watch` in `repo` and point the window `label` at it. Replaces that window's previous server.
-fn open_repo(app: &AppHandle, label: &str, repo: &Path) -> Result<(), String> {
-    if let Some(old) = app.state::<Sessions>().0.lock().unwrap().get_mut(label).and_then(|s| s.child.take()) {
-        let _ = old.kill();
-    }
+/// Start a braid server (`watch` or `demo`) and wait until it answers. Returns its port.
+fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str>) -> Result<(u16, CommandChild), String> {
     let port = free_port()?;
-    let token = session_token()?;
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("braid")
-        .map_err(|e| e.to_string())?
-        // The token goes in the environment, not argv, so it does not show up in `ps`.
-        .env("BRAID_CONTROL_TOKEN", &token)
-        .args(["watch", "--control", "--port", &port.to_string()])
-        .current_dir(repo)
+    let mut command = app.shell().sidecar("braid").map_err(|e| e.to_string())?;
+    // The token goes in the environment, not argv, so it does not show up in `ps`.
+    if let Some(token) = token {
+        command = command.env("BRAID_CONTROL_TOKEN", token);
+    }
+    let (mut rx, child) = command
+        .args(args.iter().cloned().chain(["--port".to_string(), port.to_string()]))
+        .current_dir(cwd)
         .spawn()
         .map_err(|e| e.to_string())?;
 
@@ -133,36 +138,108 @@ fn open_repo(app: &AppHandle, label: &str, repo: &Path) -> Result<(), String> {
         let why = output.lock().unwrap().trim().to_string();
         return Err(if why.is_empty() { "braid did not start".to_string() } else { why });
     }
+    Ok((port, child))
+}
 
-    // The window may have been closed while the server started.
-    let Some(window) = app.get_webview_window(label) else {
-        let _ = child.kill();
-        return Err("the window was closed".to_string());
+/// Show a running server in a window: reuse `existing`, or create a dashboard window that opens straight on it
+/// (so there is never an empty window while the server starts). Returns the window's label.
+fn present(app: &AppHandle, existing: Option<&str>, child: CommandChild, repo: Option<&Path>, url: Url, title: &str) -> Result<String, String> {
+    let window = match existing.and_then(|l| app.get_webview_window(l)) {
+        Some(w) => {
+            // Replace that window's previous server.
+            if let Some(old) = app.state::<Sessions>().0.lock().unwrap().get_mut(w.label()).and_then(|s| s.child.take()) {
+                let _ = old.kill();
+            }
+            if let Err(e) = w.navigate(url) {
+                let _ = child.kill();
+                return Err(e.to_string());
+            }
+            let _ = w.set_title(title);
+            w
+        }
+        None => {
+            let n = app.state::<WindowCounter>().0.fetch_add(1, Ordering::SeqCst) + 2;
+            match WebviewWindowBuilder::new(app, format!("w{n}"), WebviewUrl::External(url))
+                .title(title)
+                .inner_size(1240.0, 820.0)
+                .min_inner_size(720.0, 520.0)
+                .build()
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    let _ = child.kill();
+                    return Err(e.to_string());
+                }
+            }
+        }
     };
+    let label = window.label().to_string();
     {
         let state = app.state::<Sessions>();
         let mut sessions = state.0.lock().unwrap();
-        let session = sessions.entry(label.to_string()).or_default();
+        let session = sessions.entry(label.clone()).or_default();
         session.child = Some(child);
-        session.repo = Some(repo.to_path_buf());
+        session.repo = repo.map(Path::to_path_buf);
     }
-    save_repo(app, repo);
-    // The token rides in the URL fragment, which is never sent to the server or written to logs.
-    let url = Url::parse(&format!("http://127.0.0.1:{port}/#token={token}")).map_err(|e| e.to_string())?;
-    window.navigate(url).map_err(|e| e.to_string())?;
-    let name = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let _ = window.set_title(&format!("braid - {name}"));
-    Ok(())
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(label)
 }
 
-/// Bring braid to the front: the focused window, else the first one.
+/// Watch `repo`. `existing` is the window to reuse (switching repository); None opens a new window.
+fn open_repo(app: &AppHandle, existing: Option<&str>, repo: &Path) -> Result<String, String> {
+    let token = session_token()?;
+    let args = vec!["watch".to_string(), "--control".to_string()];
+    let (port, child) = start_server(app, &args, repo, Some(&token))?;
+    // The token rides in the URL fragment, which is never sent to the server or written to logs.
+    let url = Url::parse(&format!("http://127.0.0.1:{port}/#token={token}")).map_err(|e| e.to_string())?;
+    let name = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let label = present(app, existing, child, Some(repo), url, &format!("braid - {name}"))?;
+    remember_repo(app, repo);
+    Ok(label)
+}
+
+/// A scripted mock run in a throwaway repository, for trying braid without spending anything.
+fn open_demo(app: &AppHandle) -> Result<(), String> {
+    let args = vec!["demo".to_string()];
+    let (port, child) = start_server(app, &args, &std::env::temp_dir(), None)?;
+    let url = Url::parse(&format!("http://127.0.0.1:{port}/")).map_err(|e| e.to_string())?;
+    present(app, None, child, None, url, "braid - demo").map(|_| ())
+}
+
+/// Open `path` from whichever window asked. The launcher is replaced by a dashboard window; a dashboard window
+/// switches in place.
+fn open_from(app: &AppHandle, label: &str, path: &Path) -> Result<(), String> {
+    if label == LAUNCHER {
+        open_repo(app, None, path)?;
+        close_launcher(app);
+        Ok(())
+    } else {
+        open_repo(app, Some(label), path).map(|_| ())
+    }
+}
+
+fn close_launcher(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(LAUNCHER) {
+        let _ = w.destroy();
+    }
+}
+
+fn report_error(app: &AppHandle, what: &str, why: &str) {
+    app.dialog().message(format!("{what}:\n\n{why}")).kind(MessageDialogKind::Error).title("braid").blocking_show();
+}
+
+/// Bring braid to the front: the focused window, else the first one, else the launcher.
 fn show_window(app: &AppHandle) {
     let windows = app.webview_windows();
     let target = windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next());
-    if let Some(w) = target {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
+    match target {
+        Some(w) => {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        None => show_launcher(app),
     }
 }
 
@@ -176,17 +253,29 @@ fn target_label(app: &AppHandle) -> Option<String> {
         .map(|(label, _)| label.clone())
 }
 
-/// A new, empty window showing the loading page. The caller picks its repository.
-fn create_window(app: &AppHandle) -> Result<String, String> {
-    let n = app.state::<WindowCounter>().0.fetch_add(1, Ordering::SeqCst) + 2;
-    let label = format!("w{n}");
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+/// The small start window: open a repository, pick a recent one, or watch a demo.
+fn show_launcher(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(LAUNCHER) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, LAUNCHER, WebviewUrl::App("index.html".into()))
         .title("braid")
-        .inner_size(1240.0, 820.0)
-        .min_inner_size(720.0, 520.0)
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(label)
+        .inner_size(520.0, 620.0)
+        .resizable(false)
+        .maximizable(false)
+        .center()
+        .build();
+    if let Err(e) = built {
+        report_error(app, "Could not open a window", &e.to_string());
+    }
+}
+
+/// New Window: another way in, via the launcher.
+fn new_window(app: AppHandle) {
+    thread::spawn(move || show_launcher(&app));
 }
 
 /// Ask for a repository for the focused window.
@@ -196,32 +285,54 @@ fn switch_focused(app: AppHandle) {
     }
 }
 
-/// What to do when the folder picker is cancelled.
-#[derive(Clone, Copy, PartialEq)]
-enum OnCancel {
-    /// Keep the window as it is (switching an existing window's repository).
-    Keep,
-    /// Close the window (a window with no repository is useless).
-    Close,
-}
-
-/// A new window with a repository picker.
-fn new_window(app: AppHandle) {
-    thread::spawn(move || match create_window(&app) {
-        Ok(label) => choose_repo(app, label, OnCancel::Close),
-        Err(why) => {
-            app.dialog().message(format!("Could not open a window: {why}")).kind(MessageDialogKind::Error).title("braid").blocking_show();
-        }
-    });
-}
-
 /// Ask for a repository, and show it in window `label`.
 fn switch_repo(app: AppHandle, label: String) {
     if let Some(w) = app.get_webview_window(&label) {
         let _ = w.show();
         let _ = w.set_focus();
     }
-    choose_repo(app, label, OnCancel::Keep);
+    choose_repo(app, label);
+}
+
+/// Calls from the launcher page. Only local windows may invoke them (no capability covers the dashboard's URL).
+#[tauri::command]
+fn recent_repos(app: AppHandle) -> Vec<String> {
+    load_recent(&app).iter().map(|p| p.to_string_lossy().to_string()).collect()
+}
+
+#[tauri::command]
+fn launcher_choose(app: AppHandle, window: tauri::WebviewWindow) {
+    let label = window.label().to_string();
+    thread::spawn(move || choose_repo(app, label));
+}
+
+#[tauri::command]
+fn launcher_open(app: AppHandle, window: tauri::WebviewWindow, path: String) {
+    let label = window.label().to_string();
+    thread::spawn(move || {
+        let path = PathBuf::from(&path);
+        if let Err(why) = open_from(&app, &label, &path) {
+            report_error(&app, &format!("Could not watch {}", path.display()), &why);
+        }
+    });
+}
+
+#[tauri::command]
+fn launcher_demo(app: AppHandle, window: tauri::WebviewWindow) {
+    eprintln!("braid: demo requested from {}", window.label());
+    thread::spawn(move || match open_demo(&app) {
+        Ok(()) => close_launcher_if(&app, window.label()),
+        Err(why) => {
+            eprintln!("braid: demo failed: {why}");
+            report_error(&app, "Could not start the demo", &why)
+        }
+    });
+}
+
+fn close_launcher_if(app: &AppHandle, label: &str) {
+    if label == LAUNCHER {
+        close_launcher(app);
+    }
 }
 
 /// Polls the run files of every open window's repository. Updates the tray and raises notifications, except
@@ -266,31 +377,18 @@ fn start_monitor(app: AppHandle) {
 }
 
 /// Ask for a repository until one starts or the user cancels. Runs off the main thread: the picker blocks.
-fn choose_repo(app: AppHandle, label: String, on_cancel: OnCancel) {
+fn choose_repo(app: AppHandle, label: String) {
     loop {
-        let Some(picked) = app.dialog().file().set_title("Choose a git repository to watch").blocking_pick_folder() else {
-            if on_cancel == OnCancel::Close {
-                if let Some(w) = app.get_webview_window(&label) {
-                    let _ = w.destroy();
-                }
-            }
-            return;
-        };
+        let Some(picked) = app.dialog().file().set_title("Choose a git repository to watch").blocking_pick_folder() else { return };
         let Ok(path) = picked.into_path() else { continue };
-        match open_repo(&app, &label, &path) {
+        match open_from(&app, &label, &path) {
             Ok(()) => return,
-            Err(why) => {
-                app.dialog()
-                    .message(format!("Could not watch {}:\n\n{why}", path.display()))
-                    .kind(MessageDialogKind::Error)
-                    .title("braid")
-                    .blocking_show();
-            }
+            Err(why) => report_error(&app, &format!("Could not watch {}", path.display()), &why),
         }
     }
 }
 
-/// `--repo PATH` (repeatable) opens one window per repository, instead of restoring the last one.
+/// `--repo PATH` (repeatable) opens one window per repository and skips the launcher.
 fn repos_from_args() -> Vec<PathBuf> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     args.windows(2).filter(|w| w[0] == "--repo").map(|w| PathBuf::from(&w[1])).filter(|p| p.is_dir()).collect()
@@ -303,6 +401,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(Sessions(Mutex::new(HashMap::new())))
         .manage(WindowCounter(AtomicUsize::new(0)))
+        .invoke_handler(tauri::generate_handler![recent_repos, launcher_choose, launcher_open, launcher_demo])
         .setup(|app| {
             // File > New Window / Open Repository, where Mac users look for them.
             let new = MenuItemBuilder::with_id("new-window", "New Window").accelerator("CmdOrCtrl+N").build(app)?;
@@ -357,32 +456,23 @@ fn main() {
             #[cfg(target_os = "macos")]
             dock::install(app.handle().clone());
 
-            // Repositories to open: --repo arguments, else the last one used, else ask.
+            // --repo arguments open dashboards directly; otherwise show the launcher, not an empty window.
             let handle = app.handle().clone();
-            let mut repos = repos_from_args();
+            let repos = repos_from_args();
             if repos.is_empty() {
-                repos.extend(saved_repo(&handle));
+                show_launcher(&handle);
+            } else {
+                thread::spawn(move || {
+                    for repo in repos {
+                        if let Err(why) = open_repo(&handle, None, &repo) {
+                            report_error(&handle, &format!("Could not watch {}", repo.display()), &why);
+                        }
+                    }
+                    if handle.webview_windows().is_empty() {
+                        show_launcher(&handle);
+                    }
+                });
             }
-            thread::spawn(move || {
-                let mut repos = repos.into_iter();
-                match repos.next() {
-                    Some(first) => {
-                        if open_repo(&handle, "main", &first).is_err() {
-                            choose_repo(handle.clone(), "main".to_string(), OnCancel::Close);
-                        }
-                    }
-                    None => choose_repo(handle.clone(), "main".to_string(), OnCancel::Close),
-                }
-                for repo in repos {
-                    if let Ok(label) = create_window(&handle) {
-                        if open_repo(&handle, &label, &repo).is_err() {
-                            if let Some(w) = handle.get_webview_window(&label) {
-                                let _ = w.destroy();
-                            }
-                        }
-                    }
-                }
-            });
             Ok(())
         })
         .on_window_event(|window, event| match event {

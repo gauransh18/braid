@@ -16,9 +16,12 @@ use std::{
 use tauri::async_runtime::Receiver;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
-/// How long a sidecar that was asked to quit gets before it is killed. Stopping a run takes a few seconds at most
-/// (agents get SIGINT, SIGTERM after 2 s and SIGKILL after 5 s); this is for one that is wedged.
-pub const GRACE: Duration = Duration::from_secs(8);
+/// How long a sidecar that was asked to quit gets before it is killed. Stopping a run is more than the few seconds the
+/// agents need (SIGINT, SIGTERM after 2 s, SIGKILL after 5 s): a check that ignores SIGTERM takes the full 5 s, and the
+/// integration worktree of a big project then takes its time to remove before the run is saved as aborted. The sidecar
+/// gives all of that 15 s itself (`stopActiveRun(15_000)` in src/cli.ts) and exits on its own afterwards, so this must be
+/// longer: a kill that lands earlier cuts the run off before it is saved. It is for a sidecar that is wedged.
+pub const GRACE: Duration = Duration::from_secs(20);
 
 /// The part of a child process that stopping needs. `CommandChild` is the real one; tests use a stand-in.
 trait Handle {

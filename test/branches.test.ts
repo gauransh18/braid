@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { readBranches } from '../src/branches.js';
+import { fetchRemotes, readBranches, readHistory } from '../src/branches.js';
 import type { RunState } from '../src/types.js';
 
 const git = (cwd: string, ...args: string[]) =>
@@ -63,6 +63,51 @@ describe('branch view', () => {
       assert.equal(by.three!.exists, false); // deleted by a retry, only the event log remembers it
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shows the whole graph, and fetch only moves remote-tracking refs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'braid-history-'));
+    try {
+      const up = join(root, 'up');
+      const me = join(root, 'me');
+      git(root, 'init', '-q', '-b', 'main', up);
+      writeFileSync(join(up, 'a.txt'), '1\n');
+      git(up, 'add', '-A');
+      git(up, 'commit', '-qm', 'first');
+      git(root, 'clone', '-q', up, me);
+      git(me, 'checkout', '-q', '-b', 'feature');
+      writeFileSync(join(me, 'f.txt'), 'f\n');
+      git(me, 'add', '-A');
+      git(me, 'commit', '-qm', 'feature work');
+      git(me, 'checkout', '-q', 'main');
+      git(me, 'merge', '-q', '--no-ff', '-m', 'merge feature', 'feature');
+      git(me, 'tag', 'v1');
+
+      const page = await readHistory(me);
+      assert.deepEqual(page.commits.map((c) => c.subject), ['merge feature', 'feature work', 'first']);
+      assert.equal(page.commits[0]!.parents.length, 2);
+      const names = page.commits.flatMap((c) => c.refs.map((r) => `${r.kind}:${r.name}`)).sort();
+      assert.deepEqual(names, ['local:feature', 'local:main', 'remote:origin/main', 'tag:v1']);
+      assert.equal(page.remotes[0]!.name, 'origin');
+      assert.equal((await readHistory(me, 1, 1)).commits[0]!.subject, 'feature work');
+      assert.equal((await readHistory(me, 0, 2)).hasMore, true);
+
+      // upstream moves on; fetch must bring it in as origin/main and change nothing of ours
+      writeFileSync(join(up, 'b.txt'), '2\n');
+      git(up, 'add', '-A');
+      git(up, 'commit', '-qm', 'upstream news');
+      const local = () => [git(me, 'for-each-ref', 'refs/heads'), git(me, 'rev-parse', 'HEAD'), git(me, 'status', '--porcelain=v2')].join('|'); // no --branch: ahead/behind legitimately shifts once origin moves
+      const before = local();
+      const res = await fetchRemotes(me);
+      assert.equal(local(), before, 'fetch must leave local branches, HEAD and the working tree alone');
+      assert.equal(res.updated.length, 1);
+      assert.equal(res.updated[0]!.name, 'origin/main');
+      assert.ok((await readHistory(me)).commits.some((c) => c.subject === 'upstream news'));
+
+      await assert.rejects(fetchRemotes(up), /no remote/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

@@ -13,17 +13,18 @@ export interface ExecResult {
 export async function exec(
   cmd: string,
   args: string[],
-  opts: { cwd: string; allowFail?: boolean; input?: string } ,
+  opts: { cwd: string; allowFail?: boolean; input?: string; env?: Record<string, string>; timeoutMs?: number },
 ): Promise<ExecResult> {
   const res = await new Promise<ExecResult>((resolve, reject) => {
     const run = spawnable(cmd, args);
-    const child = spawn(run.cmd, run.args, { cwd: opts.cwd, windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments });
+    const child = spawn(run.cmd, run.args, { cwd: opts.cwd, windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments, env: opts.env ? { ...process.env, ...opts.env } : undefined });
+    const timer = opts.timeoutMs ? setTimeout(() => child.kill(), opts.timeoutMs) : undefined;
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d));
     child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code: code ?? 1, stdout, stderr }); });
     // A child that exits (or never starts) before reading stdin makes the write fail with EPIPE. That is not an
     // error of ours: the exit code or the spawn error already says what happened, so swallow it here.
     child.stdin.on('error', () => undefined);

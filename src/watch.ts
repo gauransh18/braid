@@ -6,7 +6,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DriverRegistry } from './drivers/driver.js';
 import { checkTools } from './doctor.js';
-import { readBranches } from './branches.js';
+import { fetchRemotes, readBranches, readHistory } from './branches.js';
 import { detectVerify, HttpError, RunManager } from './runs.js';
 import { RunStore, stateRoot } from './store.js';
 import type { RunState } from './types.js';
@@ -153,6 +153,13 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
     runs.applySettings({ env: body.env && typeof body.env === 'object' ? body.env : undefined, defaults: body.defaults && typeof body.defaults === 'object' ? body.defaults : undefined });
     return send(res, 200, { ok: true });
   }
+  if (parts[1] === 'fetch' && parts.length === 2 && req.method === 'POST') {
+    try {
+      return send(res, 200, await fetchRemotes(repo));
+    } catch (err) {
+      throw new HttpError(502, err instanceof Error ? err.message : String(err));
+    }
+  }
   if (parts[1] === 'plan-draft' && parts.length === 2) {
     const body = await readBody(req);
     const verify = Array.isArray(body.verify) ? body.verify.map(String) : [];
@@ -189,7 +196,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (parts[0] === 'api' && parts[1] === 'config' && req.method === 'GET') return send(res, 200, { control: !!control });
-  const writes = ['status', 'plans', 'plan-draft', 'doctor', 'settings', 'agents'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
+  const writes = ['status', 'plans', 'plan-draft', 'doctor', 'settings', 'agents', 'fetch'].includes(parts[1] ?? '') || (parts[1] === 'runs' && req.method !== 'GET') || (parts[1] === 'run' && req.method !== 'GET');
   if (parts[0] === 'api' && writes) {
     if (!control) return send(res, 405, { error: 'read-only' });
     return handleControl(repo, req, res, parts, control);
@@ -215,6 +222,12 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
       }),
     );
     return send(res, 200, runs.reverse());
+  }
+
+  if (parts[1] === 'history' && parts.length === 2) {
+    const skip = Number(url.searchParams.get('skip') ?? 0) || 0;
+    const limit = Number(url.searchParams.get('limit') ?? 300) || 300;
+    return send(res, 200, await readHistory(repo, skip, limit));
   }
 
   const runId = parts[2] ?? '';

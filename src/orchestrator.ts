@@ -356,7 +356,9 @@ export class Orchestrator {
         if (fresh) {
           await this.git.removeWorktree(dir);
           await this.git.deleteBranch(branch);
-          forkPoint = await this.git.revParse('HEAD', this.integrationDir);
+          // The last verified head, not the live one: while another task's merge is being checked the head already is
+          // that merge, and a task forked from it would carry the merge along even when the check rolls it back.
+          forkPoint = this.state.verifiedHead ?? (await this.git.revParse('HEAD', this.integrationDir));
           await this.git.addWorktree(dir, branch, forkPoint);
           const setup = await this.runSetup(dir);
           if (!setup.ok) return this.opts.signal?.aborted ? this.setStatus(s, 'skipped', { error: 'run aborted' }) : this.setStatus(s, 'failed', { error: setup.output });

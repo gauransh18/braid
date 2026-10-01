@@ -201,9 +201,36 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.45); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; padding: 18px 20px 28px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
 .panel-h { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px 0; }
-.panel-h h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.panel-h h2 { white-space: nowrap; margin: 0; font-size: 17px; font-weight: 600; }
 .panel-h .sub { color: var(--muted); font-size: 12px; }
 .goal { padding: 4px 16px 0; color: var(--muted); font-size: 13px; }
+
+/* ---------- git branches view ---------- */
+.seg { margin: 8px 16px 0; align-self: flex-start; display: inline-flex; width: fit-content; white-space: nowrap; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; padding: 3px 10px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button[aria-selected="true"] { background: var(--accent-soft, var(--bg-2)); color: var(--text); font-weight: 600; }
+.gitview { padding: 10px 16px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.gitview[hidden] { display: none; }
+.g-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.g-trunk { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.g-trunk code, .g-br code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.g-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-top: 4px; }
+.g-br { border: 1px solid var(--line-2); border-left: 4px solid var(--c, var(--line-2)); border-radius: 9px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--panel); }
+.g-br .g-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.g-br .g-top b { font-weight: 600; }
+.g-br .g-meta { color: var(--muted); font-size: 12px; }
+.g-br ul { margin: 2px 0 0; padding: 0 0 0 14px; list-style: none; border-left: 1px dashed var(--line-2); display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.g-br ul li.bad { color: var(--err); }
+.g-br ul li.good { color: var(--ok); }
+.g-br.trash { opacity: .85; border-style: dashed; }
+.fate { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.fate.in { background: var(--ok-soft); color: var(--ok); }
+.fate.out { background: var(--err-soft); color: var(--err); }
+.fate.gone { background: var(--bg-2); color: var(--muted); }
+.fate.live { background: var(--info-soft); color: var(--info); }
+.fate.wait { background: var(--bg-2); color: var(--faint); }
+.g-copy { align-self: flex-start; font: inherit; font-size: 11.5px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); cursor: pointer; }
+.g-copy:hover { color: var(--text); border-color: var(--accent); }
 
 /* ---------- floor (DAG) ---------- */
 .floor-wrap { position: relative; overflow-x: auto; overflow-y: hidden; padding: 14px 16px 18px; }
@@ -751,8 +778,10 @@ function renderAll() {
       <div class="side">
         <section class="panel" aria-label="Integration braid">
           <div class="panel-h"><h2 class="pixel">The braid</h2><span class="sub">integration branch</span></div>
+          <div class="seg" role="tablist" aria-label="Braid view"><button role="tab" id="tabBeads" aria-selected="true">Strands</button><button role="tab" id="tabGit" aria-selected="false">Git branches</button></div>
           <div class="branch mono" id="branch"></div>
           <div class="braid-box" id="braid"></div>
+          <div class="gitview" id="gitview" hidden></div>
         </section>
         <section class="panel" aria-label="Activity">
           <div class="panel-h"><h2 class="pixel">Activity</h2><span class="sub" id="feedSub"></span></div>
@@ -761,6 +790,7 @@ function renderAll() {
       </div>
     </div>`;
     buildFloor();
+    setBraidTab(!!S.gitView);
   }
   updateFloor();
   renderBraid();
@@ -1004,7 +1034,90 @@ function mergeOrder() {
   return [...seen.entries()].filter(([id]) => S.state.tasks[id]?.status === 'done').map(([id, ts]) => ({ id, ts }));
 }
 
+/** Per-task story from the event log: what happened to each branch, in order. Git only knows where branches are now. */
+function branchStory(id) {
+  const out = []; let attempt = 0;
+  const hhmm = (e) => (e.ts || '').slice(11, 16);
+  for (const e of S.events) {
+    if (e.task !== id) continue;
+    if (e.type === 'task_status') {
+      if (e.status === 'running' && !(S.state.tasks[id] && attempt && out.at(-1)?.t === 'resolve')) { attempt++; out.push({ k: '', text: attempt === 1 ? 'Branch created, agent started knitting' : `Retry ${attempt}: fresh branch cut from the latest braid`, ts: hhmm(e) }); }
+      if (e.status === 'failed') out.push({ k: 'bad', text: 'Gave up' + (e.error ? ': ' + String(e.error).split('\n')[0].slice(0, 90) : ''), ts: hhmm(e) });
+      if (e.status === 'replaced') out.push({ k: '', text: 'Replaced by new tasks', ts: hhmm(e) });
+    } else if (e.type === 'verify' && e.code !== 0) out.push({ k: 'bad', text: 'Checks failed on this branch', ts: hhmm(e) });
+    else if (e.type === 'review' && !e.approve) out.push({ k: 'bad', text: 'Reviewer asked for changes', ts: hhmm(e) });
+    else if (e.type === 'merge' && e.ok) out.push({ k: 'good', text: 'Merged into the braid', ts: hhmm(e) });
+    else if (e.type === 'merge' && !e.ok) out.push({ k: 'bad', text: 'Merge hit a conflict, nothing was changed', ts: hhmm(e) });
+    else if (e.type === 'merge_reverted') out.push({ k: 'bad', text: 'Merge rolled back: it broke the checks once combined', ts: hhmm(e) });
+    else if (e.type === 'sync') out.push({ k: '', text: 'Newer braid work brought into this branch', ts: hhmm(e) });
+  }
+  return out;
+}
+function branchFate(id, b) {
+  const t = S.state.tasks[id];
+  if (t.status === 'replaced') return ['gone', 'replaced'];
+  if (b?.merged && t.status === 'done') return ['in', 'in the braid'];
+  if (['failed', 'blocked', 'skipped'].includes(t.status)) return ['out', b?.exists ? 'left out, branch kept' : 'left out'];
+  if (t.status === 'pending') return ['wait', 'waiting'];
+  if (t.status === 'done') return ['in', 'in the braid'];
+  return ['live', 'knitting'];
+}
+async function loadGit() {
+  if (!S.runId || S.gitView !== true) return;
+  try { S.git = await getJSON(`/api/run/${S.runId}/branches`); } catch { S.git = null; }
+  renderGit();
+}
+function renderGit() {
+  const el = $('gitview');
+  if (!S.gitView || !S.plan || !S.state) return;
+  const g = S.git;
+  const tasks = S.plan.tasks.filter(t => S.state.tasks[t.id]);
+  const withBranch = tasks.filter(t => S.state.tasks[t.id].branch || S.state.tasks[t.id].status !== 'pending');
+  const byTask = Object.fromEntries((g?.branches || []).map(b => [b.task, b]));
+  const row = (t) => {
+    const st = S.state.tasks[t.id], b = byTask[t.id];
+    const [cls, label] = branchFate(t.id, b);
+    const story = branchStory(t.id);
+    const stat = b?.exists ? [b.commits.length ? `${b.commits.length >= 8 ? '8+' : b.commits.length} commit${b.commits.length > 1 ? 's' : ''}` : '', b.files ? `${b.files} file${b.files > 1 ? 's' : ''} +${b.insertions} -${b.deletions}` : '', b.tip ? `tip ${b.tip}` : ''].filter(Boolean).join(' · ') : (st.branch ? 'branch no longer exists' : '');
+    const trash = cls === 'out' || cls === 'gone';
+    return `<div class="g-br ${trash ? 'trash' : ''}" style="--c:${colorOf(t.id)}">
+      <div class="g-top"><b style="color:${colorOf(t.id)}">${esc(t.id)}</b><span class="fate ${cls}">${esc(label)}</span></div>
+      ${st.branch ? `<code>${esc(st.branch)}</code>` : ''}
+      ${stat ? `<div class="g-meta">${esc(stat)}</div>` : ''}
+      ${story.length ? `<ul>${story.map(x => `<li class="${x.k}">${esc(x.ts)} ${esc(x.text)}</li>`).join('')}</ul>` : ''}
+      ${b?.exists && !b.merged ? `<button class="g-copy" data-text="${esc(`git log ${g.base}..${st.branch}`)}">Copy: git log for this branch</button>` : ''}
+    </div>`;
+  };
+  const inBraid = withBranch.filter(t => branchFate(t.id, byTask[t.id])[0] === 'in');
+  const bin = withBranch.filter(t => ['out', 'gone'].includes(branchFate(t.id, byTask[t.id])[0]));
+  const live = withBranch.filter(t => !inBraid.includes(t) && !bin.includes(t));
+  const rolled = S.events.filter(e => e.type === 'merge_reverted').length;
+  el.innerHTML = `
+    <div class="g-trunk"><code>${esc(S.state.base)}</code><span class="g-meta">base, untouched</span></div>
+    <div class="g-trunk"><code>${esc(S.state.integrationBranch)}</code><span class="g-meta">${g?.integration.exists ? `${g.integration.commitsAhead ?? '?'} commits ahead of base` : 'branch not found'}${rolled ? `, ${rolled} merge${rolled > 1 ? 's' : ''} rolled back` : ''}</span></div>
+    ${live.length ? `<div class="g-h">Being knitted</div>${live.map(row).join('')}` : ''}
+    ${inBraid.length ? `<div class="g-h">Merged into the braid (${inBraid.length})</div>${inBraid.map(row).join('')}` : ''}
+    ${bin.length ? `<div class="g-h">Left out, in the bin (${bin.length})</div>${bin.map(row).join('')}` : ''}
+    ${!withBranch.length ? '<div class="g-note">No branches yet. They appear as agents start.</div>' : ''}
+    <div class="g-note">Read-only view. It only reads git and the run log, so your branches and history are never changed from here. Branches that were left out are kept so you can inspect them; a retry replaces its own earlier branch.</div>`;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.g-copy');
+  if (b) { try { await navigator.clipboard.writeText(b.dataset.text); b.textContent = 'Copied'; } catch { b.textContent = b.dataset.text; } return; }
+  if (e.target.closest('#tabBeads')) setBraidTab(false);
+  if (e.target.closest('#tabGit')) setBraidTab(true);
+});
+function setBraidTab(git) {
+  S.gitView = git;
+  $('tabBeads').setAttribute('aria-selected', String(!git)); $('tabGit').setAttribute('aria-selected', String(git));
+  $('braid').hidden = git; $('gitview').hidden = !git; $('branch').hidden = git;
+  if (git) { renderGit(); loadGit(); }
+}
+// While the git view is open, re-read git every few seconds (reads only).
+setInterval(() => { if (S.gitView && !document.hidden) loadGit(); }, 4000);
+
 function renderBraid() {
+  if (S.gitView) renderGit();
   $('branch').textContent = S.state.integrationBranch || '';
   const merged = mergeOrder();
   const total = S.plan.tasks.length;

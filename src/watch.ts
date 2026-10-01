@@ -6,8 +6,10 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DriverRegistry } from './drivers/driver.js';
 import { checkTools } from './doctor.js';
+import { readBranches } from './branches.js';
 import { detectVerify, HttpError, RunManager } from './runs.js';
 import { RunStore, stateRoot } from './store.js';
+import type { RunState } from './types.js';
 
 const UI_PATH = fileURLToPath(new URL('../../ui/index.html', import.meta.url));
 const RUN_ID_RE = /^[0-9]{8}-[0-9]{6}-[a-z0-9]{2,8}$/;
@@ -225,6 +227,11 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
     return send(res, 200, { plan, state });
   }
   if (parts[3] === 'events' && parts.length === 4) return streamRun(runDir, req, res);
+  if (parts[3] === 'branches' && parts.length === 4) {
+    const state = (await readJson(join(runDir, 'state.json'))) as RunState | null;
+    if (!state) return send(res, 404, { error: 'no state yet' });
+    return send(res, 200, await readBranches(repo, state));
+  }
   if (parts[3] === 'task' && parts[5] === 'log' && parts.length === 6) {
     const taskId = parts[4] ?? '';
     if (!TASK_ID_RE.test(taskId)) return send(res, 404, { error: 'bad task id' });

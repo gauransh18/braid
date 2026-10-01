@@ -40,17 +40,18 @@ const OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_e
 const OUT_OF_USAGE = 'Claude AI usage limit reached|1700000000';
 
 describe('a call waiting to be retried', () => {
-  // b is turned away with a 529 and sleeps 600 ms or more; a, which takes 200 ms, then uses up the run's tokens or its
-  // agent's quota. b must not call the agent again when it wakes.
+  // b is turned away with a 529 and sleeps 1.5 s or more; a, which takes 500 ms, then uses up the run's tokens or its
+  // agent's quota. b must not call the agent again when it wakes. The margins are wide so a busy machine does not
+  // reorder the three things that have to happen in this order.
   async function run(aStep: MockStep, extra: Partial<PlanSpec> = {}) {
     const repo = await makeRepo();
     let bCalls = 0;
     const mock = new MockDriver((o): MockStep => {
-      if (taskOf(o) === 'a') return { ...aStep, delayMs: 200 };
+      if (taskOf(o) === 'a') return { ...aStep, delayMs: 500 };
       return ++bCalls === 1 ? { ok: false, text: OVERLOADED } : { files: { 'b.txt': 'b\n' } };
     });
     const plan: PlanSpec = { goal: 'g', driver: 'mock', concurrency: 2, tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p' }], ...extra };
-    const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock), retryDelaysMs: [600] }).run();
+    const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock), retryDelaysMs: [1500] }).run();
     return { state, bCalls };
   }
 
@@ -87,7 +88,7 @@ describe('a reviewer on another agent', () => {
   it('that ran out of quota stops a task that is still working, not only tasks that have not started', async () => {
     const repo = await makeRepo();
     let bTries = 0;
-    const worker = new MockDriver((o): MockStep => (taskOf(o) === 'b' ? { files: { 'b.txt': ++bTries === 1 ? 'bad\n' : 'ok\n' }, delayMs: 500 } : { files: { 'a.txt': 'ok\n' } }));
+    const worker = new MockDriver((o): MockStep => (taskOf(o) === 'b' ? { files: { 'b.txt': ++bTries === 1 ? 'bad\n' : 'ok\n' }, delayMs: 1500 } : { files: { 'a.txt': 'ok\n' } }));
     // a reaches its review first and finds the reviewer's account empty; b is then still in its first attempt, which fails its check.
     const reviewer = new MockDriver(() => ({ ok: false, text: OUT_OF_USAGE }), 'rev');
     const plan = reviewed({ concurrency: 2, verify: ['node check.js'], tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p' }] });

@@ -15,11 +15,11 @@ after(() => {
   for (const d of temps) rmSync(d, { recursive: true, force: true });
 });
 
-// Fails when pa.txt and pb.txt are in the tree together. In the integration worktree it first takes 800 ms, as a real
+// Fails when pa.txt and pb.txt are in the tree together. In the integration worktree it first takes 1.2 s, as a real
 // suite does, so the combined check of one merge is still running when other tasks finish and start.
 const CHECK_JS = `
 const fs = require('fs');
-if (require('path').basename(process.cwd()) === '_integration') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
+if (require('path').basename(process.cwd()) === '_integration') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);
 if (fs.existsSync('pa.txt') && fs.existsSync('pb.txt')) { console.error('pa.txt and pb.txt cannot be together'); process.exit(1); }
 `;
 
@@ -58,7 +58,7 @@ describe('where a task starts from', () => {
       const t = taskOf(o);
       if (t === 'e') forkedWithPa.push(existsSync(join(o.cwd, 'pa.txt')));
       // p is the slower worker, so its merge is queued behind q's while q's combined check runs.
-      return { files: { [`${t === 'p' ? 'pa' : t === 'q' ? 'pb' : t}.txt`]: 'x\n' }, ...(t === 'p' ? { delayMs: 300 } : {}) };
+      return { files: { [`${t === 'p' ? 'pa' : t === 'q' ? 'pb' : t}.txt`]: 'x\n' }, ...(t === 'p' ? { delayMs: 600 } : {}) };
     });
     const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock) }).run();
 

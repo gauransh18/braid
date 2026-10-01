@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { DriverRegistry, DriverRunOptions } from './drivers/driver.js';
 import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
+import { terminalHint } from './hints.js';
 import { applyReplan, DEFAULT_TOKENS_PER_TASK, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
@@ -298,7 +299,7 @@ export class Orchestrator {
   private async runSetup(cwd: string): Promise<{ ok: boolean; output: string }> {
     for (const cmd of this.plan.setup ?? []) {
       const res = await this.sh(cmd, cwd, 'setup');
-      if (res.code !== 0) return { ok: false, output: `setup \`${cmd}\` ${describeExit(res)}\n${tail(res.stdout + res.stderr)}` };
+      if (res.code !== 0) return { ok: false, output: `setup \`${cmd}\` ${describeExit(res)}\n${failureTail(res.stdout + res.stderr)}` };
     }
     return { ok: true, output: '' };
   }
@@ -309,7 +310,7 @@ export class Orchestrator {
       // Cut short by an abort: not a verdict on the work, so it is neither logged as a check nor fed back.
       if (res.aborted) throw abortError();
       this.store.event('verify', { task: task.id, cmd, code: res.code, dir: cwd === this.integrationDir ? 'integration' : 'task' });
-      if (res.code !== 0) return { ok: false, report: `\`${cmd}\` ${describeExit(res)}:\n${tail(res.stdout + res.stderr)}` };
+      if (res.code !== 0) return { ok: false, report: `\`${cmd}\` ${describeExit(res)}:\n${failureTail(res.stdout + res.stderr)}` };
     }
     return { ok: true, report: '' };
   }
@@ -670,4 +671,10 @@ function describeExit(res: ShellResult): string {
 
 function tail(text: string, n = 4000): string {
   return text.length > n ? `...${text.slice(-n)}` : text;
+}
+
+/** The end of a failed command's output, plus a hint line when it failed for want of a terminal. Matched on all of the output; the shorter tail keeps the hint clear of the 4000-character cut stored errors get. */
+function failureTail(output: string): string {
+  const hint = terminalHint(output);
+  return hint ? `${tail(output, 3000)}\n${hint}` : tail(output);
 }

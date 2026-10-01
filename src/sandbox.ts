@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { abortError, exec } from './proc.js';
+import { abortError, exec, pidAlive } from './proc.js';
 import type { SandboxSpec } from './types.js';
 
 /** A command line about to be spawned; a sandbox rewrites it to run inside a container. */
@@ -27,6 +27,9 @@ const HOME_DIR = '/tmp/braid-home';
  * always has network, because it has to reach its model API.
  */
 export class Sandbox {
+  /** Ids of stale containers (left by a braid that died) removed when this sandbox was created. */
+  swept: string[] = [];
+
   private constructor(
     readonly spec: SandboxSpec,
     readonly runtime: string,
@@ -39,7 +42,12 @@ export class Sandbox {
     for (const bin of candidates) {
       const res = await probe(bin, ['info'], signal);
       if (signal?.aborted) throw abortError();
-      if (res.code === 0) return new Sandbox(spec, bin);
+      if (res.code === 0) {
+        const sandbox = new Sandbox(spec, bin);
+        sandbox.swept = await sweepStale(bin, signal);
+        if (signal?.aborted) throw abortError();
+        return sandbox;
+      }
       problems.push(res.missing ? `${bin}: not installed` : `${bin}: not running (${res.stderr.trim().split('\n')[0] || `exit ${res.code}`})`);
     }
     throw new Error(`sandbox needs a container runtime, but none works:\n  - ${problems.join('\n  - ')}\nInstall and start Docker or Podman, or remove "sandbox" from the plan.`);
@@ -59,6 +67,11 @@ export class Sandbox {
       '--init',
       '--name',
       o.name,
+      // What sweepStale finds them by, when this process is no longer around to remove them.
+      '--label',
+      'braid=1',
+      '--label',
+      `braid.pid=${process.pid}`,
       ...(o.interactive ? ['-i'] : []),
       '--cap-drop',
       'ALL',
@@ -114,6 +127,31 @@ export class Sandbox {
 /** A name braid can stop the container by, since killing the `docker run` client leaves the container running. */
 function containerName(): string {
   return `braid-${randomBytes(6).toString('hex')}`;
+}
+
+/**
+ * Containers outlive a braid that was killed outright (SIGKILL, a crash, power loss): `--rm` and the removal by name only
+ * run while braid does. Each container carries the pid of the braid that started it, so one whose pid is gone is stale.
+ * Never touches our own pid or a live one, skips rows it cannot read, and never throws: housekeeping must not stop a run.
+ * Returns the ids it removed.
+ */
+export async function sweepStale(runtime: string, signal?: AbortSignal): Promise<string[]> {
+  const removed: string[] = [];
+  try {
+    const list = await exec(runtime, ['ps', '-a', '--filter', 'label=braid', '--format', '{{.ID}} {{.Label "braid.pid"}}'], { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
+    if (list.code !== 0) return removed;
+    for (const row of list.stdout.split('\n')) {
+      const m = /^\s*([0-9a-f]{4,64})\s+(\d+)\s*$/i.exec(row);
+      const pid = m ? Number(m[2]) : 0;
+      if (!m || !Number.isSafeInteger(pid) || pid < 1 || pid === process.pid || pidAlive(pid)) continue;
+      if (signal?.aborted) break;
+      const rm = await exec(runtime, ['rm', '-f', m[1]!], { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
+      if (rm.code === 0) removed.push(m[1]!);
+    }
+  } catch {
+    /* no runtime, a daemon that stopped answering: whatever was removed so far still counts */
+  }
+  return removed;
 }
 
 /** Ask a container runtime whether it works. Stoppable, and its whole process tree dies on the time limit. */

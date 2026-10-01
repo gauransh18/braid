@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, OnceLock,
+        Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -26,14 +26,16 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 mod monitor;
 mod settings;
+mod sidecar;
 #[cfg(target_os = "macos")]
 mod dock;
-use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
+use sidecar::Sidecar;
+use tauri_plugin_shell::ShellExt;
 
 /// One dashboard window: its own repository and its own `braid watch` process.
 #[derive(Default)]
 struct Session {
-    child: Option<CommandChild>,
+    child: Option<Sidecar>,
     repo: Option<PathBuf>,
     /// Port and token of a `watch --control` server, so settings can be pushed to it.
     control: Option<(u16, String)>,
@@ -126,12 +128,15 @@ fn wait_for_port(port: u16, timeout: Duration) -> bool {
 }
 
 /// Start a braid server (`watch` or `demo`) and wait until it answers. Returns its port.
-fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str>) -> Result<(u16, CommandChild), String> {
+fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str>) -> Result<(u16, Sidecar), String> {
     let port = free_port()?;
     let mut command = app.shell().sidecar("braid").map_err(|e| e.to_string())?.env("PATH", user_path());
     // The token goes in the environment, not argv, so it does not show up in `ps`.
     if let Some(token) = token {
         command = command.env("BRAID_CONTROL_TOKEN", token);
+        // A run started from the dashboard lives in this process. It is stopped by saying "quit" on stdin (or by stdin
+        // closing, if this app dies), never by killing it, which would leak the run's agents, checks and containers.
+        command = command.env("BRAID_EXIT_ON_STDIN_CLOSE", "1");
         // Lets the dashboard's agent switches save to the same file Settings uses.
         if let Some(file) = settings::file(app) {
             if let Some(dir) = file.parent() {
@@ -140,38 +145,20 @@ fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str
             command = command.env("BRAID_SETTINGS_FILE", file.to_string_lossy().to_string());
         }
     }
-    let (mut rx, child) = command
+    let (rx, child) = command
         .args(args.iter().cloned().chain(["--port".to_string(), port.to_string()]))
         .current_dir(cwd)
         .spawn()
         .map_err(|e| e.to_string())?;
-
-    // Keep the last lines the process printed so a failure can say why.
-    let output = Arc::new(Mutex::new(String::new()));
-    let sink = output.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
-                    let mut text = sink.lock().unwrap();
-                    text.push_str(&String::from_utf8_lossy(&line));
-                    if text.len() > 2000 {
-                        let cut = text.len() - 2000;
-                        text.drain(..cut);
-                    }
-                }
-                CommandEvent::Terminated(_) => break,
-                _ => {}
-            }
-        }
-    });
+    // Only a server with controls hosts runs, and only that one understands "quit".
+    let sidecar = Sidecar::adopt(rx, child, token.is_some());
 
     if !wait_for_port(port, Duration::from_secs(15)) {
-        let _ = child.kill();
-        let why = output.lock().unwrap().trim().to_string();
+        let why = sidecar.output();
+        sidecar.kill();
         return Err(if why.is_empty() { "braid did not start".to_string() } else { why });
     }
-    Ok((port, child))
+    Ok((port, sidecar))
 }
 
 /// Show a running server in a window: reuse `existing`, or create a dashboard window that opens straight on it
@@ -179,7 +166,7 @@ fn start_server(app: &AppHandle, args: &[String], cwd: &Path, token: Option<&str
 fn present(
     app: &AppHandle,
     existing: Option<&str>,
-    child: CommandChild,
+    child: Sidecar,
     repo: Option<&Path>,
     control: Option<(u16, String)>,
     url: Url,
@@ -187,12 +174,12 @@ fn present(
 ) -> Result<String, String> {
     let window = match existing.and_then(|l| app.get_webview_window(l)) {
         Some(w) => {
-            // Replace that window's previous server.
+            // Replace that window's previous server. A run it hosts is stopped properly, without making the switch wait.
             if let Some(old) = app.state::<Sessions>().0.lock().unwrap().get_mut(w.label()).and_then(|s| s.child.take()) {
-                let _ = old.kill();
+                old.stop();
             }
             if let Err(e) = w.navigate(url) {
-                let _ = child.kill();
+                child.kill();
                 return Err(e.to_string());
             }
             let _ = w.set_title(title);
@@ -208,7 +195,7 @@ fn present(
             {
                 Ok(w) => w,
                 Err(e) => {
-                    let _ = child.kill();
+                    child.kill();
                     return Err(e.to_string());
                 }
             }
@@ -785,7 +772,7 @@ fn main() {
                 let app = window.app_handle();
                 if let Some(session) = app.state::<Sessions>().0.lock().unwrap().remove(window.label()) {
                     if let Some(child) = session.child {
-                        let _ = child.kill();
+                        child.stop();
                     }
                 }
             }
@@ -806,11 +793,9 @@ fn main() {
             show_window(app);
         }
         if let RunEvent::Exit = event {
-            for (_, session) in app.state::<Sessions>().0.lock().unwrap().drain() {
-                if let Some(child) = session.child {
-                    let _ = child.kill();
-                }
-            }
+            // Wait for the servers to wind their runs down: nothing else will once this process is gone.
+            let servers: Vec<Sidecar> = app.state::<Sessions>().0.lock().unwrap().drain().filter_map(|(_, session)| session.child).collect();
+            sidecar::stop_all(servers);
         }
     });
 }

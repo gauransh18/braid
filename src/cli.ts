@@ -15,6 +15,7 @@ import { fetchModels, isProvider, testProvider } from './models.js';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants as osConstants } from 'node:os';
+import { createInterface } from 'node:readline';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens } from './tokens.js';
 import { loadPlan } from './plan.js';
@@ -106,6 +107,9 @@ function printEvent(e: HarnessEvent): void {
       break;
     case 'sandbox':
       console.log(`${t} sandbox: ${e.runtime} ${e.image}${e.agent ? ' (agent runs inside too)' : ' (setup and verify only)'}`);
+      break;
+    case 'sandbox_sweep':
+      console.log(`${t} sandbox: removed ${e.count} stale container(s) left by an earlier braid that was killed`);
       break;
     case 'run_resume':
       console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
@@ -286,6 +290,21 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
         process.exit(0);
       });
     });
+    // The desktop app runs this as a sidecar. Killing it would leak the children and containers of a run, so the app
+    // says "quit" on stdin, and a closed stdin means the app is gone: both count as the first Ctrl-C, once. A
+    // terminal's stdin belongs to the user, so it is only read when the app asks for this.
+    if (process.env.BRAID_EXIT_ON_STDIN_CLOSE === '1') {
+      let asked = false;
+      const quit = () => {
+        if (asked) return;
+        asked = true;
+        process.emit('SIGINT', 'SIGINT');
+      };
+      const lines = createInterface({ input: process.stdin });
+      lines.on('line', (line) => line.trim() === 'quit' && quit());
+      lines.on('close', quit);
+      process.stdin.on('error', quit);
+    }
     console.log(`braid watch: ${watch.url}${token && !process.env.BRAID_CONTROL_TOKEN ? `#token=${token}` : ''}  (Ctrl-C to exit)`);
     if (token) console.log('controls enabled: open the URL above (the token is in the part after #)');
     await new Promise(() => undefined);

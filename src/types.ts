@@ -131,7 +131,7 @@ export interface RunState {
   status: 'running' | 'done' | 'failed' | 'aborted';
   costUsd: number;
   tokens?: TokenUsage;
-  /** True when `costUsd` includes a list-price estimate (Codex, Gemini) rather than a figure the CLI reported. Tokens are always as reported. */
+  /** True when `costUsd` includes a list-price estimate (Codex, Gemini) rather than a figure the CLI reported. Tokens are as reported, except those of a Gemini call that ended before it reported any, which are estimated. */
   costEstimated?: boolean;
   createdAt: string;
   endedAt?: string;
@@ -159,7 +159,7 @@ export interface AgentResult {
   text: string;
   costUsd: number;
   tokens?: TokenUsage;
-  /** `costUsd` was computed from tokens and list prices, not reported by the CLI. */
+  /** `costUsd` was computed from tokens and list prices, not reported by the CLI. Gemini's `tokens` are an estimate too when it ended before reporting any. */
   costEstimated?: boolean;
   sessionId?: string;
   /**

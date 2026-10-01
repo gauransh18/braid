@@ -30,11 +30,13 @@ const USAGE = `braid - headless multi-agent harness
 
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
-  braid run <plan.json> [--concurrency N] [--replan N] [--budget-tokens N] [--timeout MIN] [--sandbox IMAGE]
-                        [--keep-worktrees] [--watch]
-                                 --budget-tokens: stop starting tasks after N fresh+output tokens (default 3M per
-                                 task, 0 = no limit); --timeout: minutes one agent call may run (default 30, 0 = no limit)
-  braid resume [runId] [--concurrency N] [--budget-tokens N] [--timeout MIN] [--keep-worktrees] [--watch]
+  braid run <plan.json> [--concurrency N] [--replan N] [--task-budget-tokens N] [--budget-tokens N] [--timeout MIN]
+                        [--sandbox IMAGE] [--keep-worktrees] [--watch]
+                                 --task-budget-tokens: what one task may use in fresh+output tokens before it fails
+                                 (default 3M, 0 = no limit); --budget-tokens: stop starting tasks once the whole run
+                                 has used N (default none); --timeout: minutes one agent call may run (default 30,
+                                 0 = no limit)
+  braid resume [runId] [--concurrency N] [--task-budget-tokens N] [--budget-tokens N] [--timeout MIN] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777] [--control]
                                  live dashboard for this repo's runs; --control adds start/stop/resume
@@ -230,6 +232,7 @@ async function main(argv: string[]): Promise<number> {
       json: { type: 'boolean' },
       budget: { type: 'string' },
       'budget-tokens': { type: 'string' },
+      'task-budget-tokens': { type: 'string' },
       timeout: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
@@ -339,6 +342,7 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     if (values.concurrency) plan.concurrency = Number(values.concurrency);
     if (values.budget) plan.budgetUsd = Number(values.budget);
     if (values['budget-tokens']) plan.budgetTokens = Number(values['budget-tokens']);
+    if (values['task-budget-tokens']) plan.taskBudgetTokens = Number(values['task-budget-tokens']);
     if (values.timeout) plan.timeoutMin = Number(values.timeout);
     if (values.replan) plan.maxReplans = Number(values.replan);
     if (values.sandbox) plan.sandbox = { ...plan.sandbox, image: values.sandbox };

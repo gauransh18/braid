@@ -3,7 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { DriverRegistry, DriverRunOptions } from './drivers/driver.js';
 import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
-import { applyReplan, DEFAULT_TOKENS_PER_TASK, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
+import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
 import { readFile } from 'node:fs/promises';
@@ -31,6 +31,9 @@ export interface OrchestratorOptions {
 /** The longest delay a timer takes: above it Node fires at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
+/** A task used up its own token allowance. Ends that task as failed; the run carries on with the others. */
+class TaskBudgetError extends Error {}
+
 /** After a rate limit or an outage: wait, try again, wait longer. About five minutes in all before giving up. */
 const RETRY_DELAYS_MS = [20_000, 40_000, 80_000, 160_000];
 
@@ -56,8 +59,8 @@ export class Orchestrator {
   private halted = new Map<string, string>();
   /** Fresh and output tokens the run had used before this process took it over; a resumed run gets a fresh allowance. */
   private tokenBaseline = 0;
-  /** Tasks this process has to run: the default token limit is sized from it, and replanned tasks do not enlarge it. */
-  private tasksToRun = 0;
+  /** Fresh and output tokens each task had used before this process took it over: a resumed task gets a fresh allowance. */
+  private taskBaseline = new Map<string, number>();
   private mergeChain: Promise<unknown> = Promise.resolve();
   private saveChain: Promise<void> = Promise.resolve();
   private saveQueued = false;
@@ -147,7 +150,6 @@ export class Orchestrator {
       this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
     }
     this.state.pid = process.pid;
-    this.tasksToRun = Object.values(this.state.tasks).filter((t) => !COMPLETE.includes(t.status)).length;
     const setup = await this.runSetup(this.integrationDir);
     // Persist before announcing: anyone who reacts to run_start by reading state.json must see this run, not a stale one.
     await this.save();
@@ -205,6 +207,7 @@ export class Orchestrator {
         continue;
       }
       retry.push(id);
+      if (t?.tokens) this.taskBaseline.set(id, t.tokens.input + t.tokens.output);
       prev.tasks[id] = { id, status: 'pending', attempts: 0, costUsd: t?.costUsd ?? 0, ...(t?.tokens ? { tokens: t.tokens } : {}) };
     }
     prev.status = 'running';
@@ -218,8 +221,8 @@ export class Orchestrator {
   /** Why the run has used up what it was allowed, or undefined while it has not. */
   private limitReached(): string | undefined {
     if (this.plan.budgetUsd !== undefined && this.state.costUsd >= this.plan.budgetUsd) return 'budget exhausted';
-    // A run that sets no limit still gets one, so a loop that keeps retrying cannot spend without end.
-    const cap = this.plan.budgetTokens ?? DEFAULT_TOKENS_PER_TASK * this.tasksToRun;
+    // Only a run-wide cap the plan asks for; what keeps a loop from spending without end is the allowance per task.
+    const cap = this.plan.budgetTokens ?? 0;
     const used = this.state.tokens ? this.state.tokens.input + this.state.tokens.output - this.tokenBaseline : 0;
     if (cap > 0 && used >= cap) {
       return `token budget exhausted (${formatTokens(used)} fresh and output tokens used; the limit is ${formatTokens(cap)}). Raise budgetTokens in the plan, or set it to 0 for no limit`;
@@ -227,10 +230,21 @@ export class Orchestrator {
     return undefined;
   }
 
-  /** Why nothing new should start (for a task on `driver`, when given), or undefined to carry on. */
-  private stopReason(driver?: string): string | undefined {
+  /** Why this task has used up its own token allowance, or undefined while it has not. */
+  private taskLimitReached(task: ResolvedTask): string | undefined {
+    const t = this.state.tasks[task.id]!;
+    const cap = task.budgetTokens;
+    const used = (t.tokens ? t.tokens.input + t.tokens.output : 0) - (this.taskBaseline.get(task.id) ?? 0);
+    if (cap > 0 && used >= cap) {
+      return `token budget exhausted for this task (${formatTokens(used)} fresh and output tokens used by its agent calls; the limit is ${formatTokens(cap)}). Raise taskBudgetTokens in the plan or budgetTokens on this task, or set it to 0 for no limit`;
+    }
+    return undefined;
+  }
+
+  /** Why nothing new should start (for `task`, when given, and its driver), or undefined to carry on. */
+  private stopReason(driver?: string, task?: ResolvedTask): string | undefined {
     if (this.opts.signal?.aborted) return 'run aborted';
-    return this.limitReached() ?? (driver ? this.halted.get(driver) : undefined);
+    return this.limitReached() ?? (task ? this.taskLimitReached(task) : undefined) ?? (driver ? this.halted.get(driver) : undefined);
   }
 
   /** Throws the abort the run was given, so every phase ends through the same path in runTask. */
@@ -329,7 +343,7 @@ export class Orchestrator {
 
     try {
       while (s.attempts < task.maxAttempts) {
-        const stop = this.stopReason(task.driver);
+        const stop = this.stopReason(task.driver, task);
         if (stop) return this.halt(s, stop);
         s.attempts++;
         const attempt = s.attempts;
@@ -346,7 +360,7 @@ export class Orchestrator {
         }
         s.branch = branch;
         // Setup can take minutes, long enough for a Stop, a limit or an agent's quota to have arrived meanwhile.
-        const stopAfterSetup = this.stopReason(task.driver);
+        const stopAfterSetup = this.stopReason(task.driver, task);
         if (stopAfterSetup) {
           s.attempts--;
           return this.halt(s, stopAfterSetup);
@@ -433,6 +447,8 @@ export class Orchestrator {
       if (this.opts.signal?.aborted) {
         // Stopping the agent mid-call throws; that is the person's Stop, not a failure of the task.
         this.setStatus(s, 'skipped', { error: 'run aborted' });
+      } else if (err instanceof TaskBudgetError) {
+        this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: err.message });
       } else if (err instanceof AgentUnavailableError) {
         // Not the work's fault, so a worker or resolver call that never got an answer does not count as a try. The
         // reviewer and the planner only run after the work itself used its attempts.
@@ -455,7 +471,7 @@ export class Orchestrator {
    * True when the task became `replaced` and the graph gained the new tasks; false leaves the caller to fail it.
    */
   private canReplan(task: ResolvedTask): boolean {
-    return (this.state.replans ?? 0) < (this.plan.maxReplans ?? 0) && !this.stopReason(task.driver);
+    return (this.state.replans ?? 0) < (this.plan.maxReplans ?? 0) && !this.stopReason(task.driver, task);
   }
 
   private async replan(task: ResolvedTask, dir: string, feedback: Feedback[]): Promise<boolean> {
@@ -516,9 +532,10 @@ export class Orchestrator {
    * One agent call, with the two safety nets around it. It is stopped after `timeoutMin` (the attempt then fails like
    * any other and is retried), and when the provider turns it away (rate limit, overload, network) it is retried
    * after a pause instead of being counted against the task. Throws AgentUnavailableError when that keeps happening,
-   * when a limit is reached meanwhile, or at once when the account is out of usage or credit, and an AbortError when
-   * the run is stopped. Spend is recorded for every call that reports it; a call killed before its agent reported
-   * anything (a timeout, a Stop) adds nothing.
+   * when a run-wide limit is reached meanwhile, or at once when the account is out of usage or credit, a
+   * TaskBudgetError when the task's own token allowance is used up meanwhile, and an AbortError when the run is
+   * stopped. Spend is recorded for every call that reports it; a call killed before its agent reported anything
+   * (a timeout, a Stop) adds nothing.
    */
   private async callAgent(task: ResolvedTask, role: string, opts: Omit<DriverRunOptions, 'signal'>): Promise<AgentResult> {
     const driver = this.opts.drivers.get(task.driver);
@@ -552,6 +569,9 @@ export class Orchestrator {
       // Only what the provider or the CLI said is judged, never the agent's own words.
       const kind = res.error ? classifyAgentFailure(res.error) : null;
       if (!kind) return res;
+      // The task's own allowance ran out meanwhile: say that, not that the provider is down.
+      const spent = kind === 'quota' ? undefined : this.taskLimitReached(task);
+      if (spent) throw new TaskBudgetError(spent);
       if (kind === 'quota' || retry >= delays.length || this.stopReason(task.driver)) throw new AgentUnavailableError(kind, res.error!, retry, role);
       const delayMs = Math.round(delays[retry]! * (1 + Math.random() * 0.25));
       this.store.event('agent_retry', { task: task.id, role, retry: retry + 1, of: delays.length, delayMs, reason: res.error!.trim().split('\n')[0]!.slice(0, 200) });

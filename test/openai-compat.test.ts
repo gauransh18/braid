@@ -98,7 +98,8 @@ describe('openai-compatible driver', () => {
       assert.match(last.at(-1).content, /const y = 3;/);
       // Events and usage
       assert.deepEqual(events.filter((e) => e.kind === 'tool').map((e) => (e as { name: string }).name), ['write_file', 'edit_file', 'read_file']);
-      assert.deepEqual(res.tokens, { input: 400, cached: 0, output: 80 });
+      // No cached_tokens from this endpoint: the first turn is fresh, later turns only count what is new since the last.
+      assert.deepEqual(res.tokens, { input: 100, cached: 300, output: 80 });
       assert.equal(res.costEstimated, true);
       assert.equal(events.at(-1)!.kind, 'result');
     } finally {

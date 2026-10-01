@@ -5,6 +5,7 @@ export const DEFAULT_ALLOWED_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'];
 /** Safety nets for a run that sets no limits of its own. Generous: they stop a runaway, not a big task. */
 export const DEFAULT_TIMEOUT_MIN = 30;
+/** What one task may use, in fresh input and output tokens, when neither the task nor the plan says otherwise. */
 export const DEFAULT_TOKENS_PER_TASK = 3_000_000;
 
 export interface ResolvedTask extends Required<Omit<TaskSpec, 'model' | 'maxTurns'>> {
@@ -32,8 +33,10 @@ export function validatePlan(plan: PlanSpec): void {
     ids.add(t.id);
     if (!t.prompt) errors.push(`task "${t.id}" has no prompt`);
     checkLimit(errors, `task "${t.id}" timeoutMin`, t.timeoutMin);
+    checkLimit(errors, `task "${t.id}" budgetTokens`, t.budgetTokens);
   }
   checkLimit(errors, 'plan.budgetTokens', plan?.budgetTokens);
+  checkLimit(errors, 'plan.taskBudgetTokens', plan?.taskBudgetTokens);
   checkLimit(errors, 'plan.timeoutMin', plan?.timeoutMin);
   for (const t of plan?.tasks ?? []) {
     for (const d of t.deps ?? []) if (!ids.has(d)) errors.push(`task "${t.id}" depends on unknown "${d}"`);
@@ -94,6 +97,7 @@ export function resolveTask(plan: PlanSpec, t: TaskSpec): ResolvedTask {
     allowedTools: t.allowedTools ?? plan.allowedTools ?? DEFAULT_ALLOWED_TOOLS,
     maxTurns: t.maxTurns ?? plan.maxTurns,
     timeoutMin: t.timeoutMin ?? plan.timeoutMin ?? DEFAULT_TIMEOUT_MIN,
+    budgetTokens: t.budgetTokens ?? plan.taskBudgetTokens ?? DEFAULT_TOKENS_PER_TASK,
   };
 }
 

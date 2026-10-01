@@ -139,39 +139,47 @@ export class Orchestrator {
   async run(): Promise<RunState> {
     const { repo, plan } = this.opts;
     await this.git.excludeStateDir();
-    if (plan.sandbox) {
-      // Fail before creating any worktree if there is no working container runtime.
-      this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox, this.opts.signal));
-    }
     this.integrationDir = this.worktreeDir('_integration');
-    if (this.opts.resume) {
-      await this.restore();
-      await this.git.removeWorktree(this.integrationDir);
-      await this.git.attachWorktree(this.integrationDir, this.state.integrationBranch);
-      // Rewind to the last verified state: a crash mid-merge may have left an unverified commit or markers.
-      await this.git.resetHard(this.integrationDir, this.state.verifiedHead!);
-      await this.git.cleanUntracked(this.integrationDir);
-    } else {
-      const base = plan.base ?? (await this.git.currentBranch());
-      this.state = {
-        runId: this.runId,
-        repo,
-        base,
-        integrationBranch: this.branch('integration'),
-        status: 'running',
-        costUsd: 0,
-        createdAt: new Date().toISOString(),
-        tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
-      };
-      await this.store.savePlan(plan);
-      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base, false);
-      this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
+    // A resumed run is claimed first: restore() writes this process into state.json before anything slow. Until then
+    // the file still shows the run's previous end, and `braid clean` takes the run for finished while its worktrees
+    // are being set up again.
+    const previous = this.opts.resume ? await this.restore() : undefined;
+    let setup: { ok: boolean; output: string };
+    try {
+      if (plan.sandbox) {
+        // Fail before creating any worktree if there is no working container runtime.
+        this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox, this.opts.signal));
+      }
+      if (previous) {
+        await this.git.removeWorktree(this.integrationDir);
+        await this.git.attachWorktree(this.integrationDir, this.state.integrationBranch);
+        // Rewind to the last verified state: a crash mid-merge may have left an unverified commit or markers.
+        await this.git.resetHard(this.integrationDir, this.state.verifiedHead!);
+        await this.git.cleanUntracked(this.integrationDir);
+      } else {
+        const base = plan.base ?? (await this.git.currentBranch());
+        this.state = {
+          runId: this.runId,
+          repo,
+          base,
+          integrationBranch: this.branch('integration'),
+          status: 'running',
+          costUsd: 0,
+          createdAt: new Date().toISOString(),
+          tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
+        };
+        await this.store.savePlan(plan);
+        await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base, false);
+        this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
+      }
+      this.state.pid = process.pid;
+      await this.save();
+      setup = await this.runSetup(this.integrationDir);
+    } catch (err) {
+      // The run never started. A resume that failed this early leaves state.json as it found it, not as a run that is running.
+      if (previous) await this.store.saveState(previous).catch(() => undefined);
+      throw err;
     }
-    this.state.pid = process.pid;
-    // Setup can take minutes. Until this lands, state.json still shows the previous process (or the run's old end), and
-    // a resumed run looks finished to `braid clean`.
-    await this.save();
-    const setup = await this.runSetup(this.integrationDir);
     // Persist before announcing: anyone who reacts to run_start by reading state.json must see this run, not a stale one.
     await this.save();
     if (this.resumeEvent) this.store.event('run_resume', this.resumeEvent);
@@ -205,9 +213,10 @@ export class Orchestrator {
 
   /**
    * Load state.json of an interrupted run. Merged tasks stay done; every other task goes back to
-   * pending with fresh attempts (its spend is kept, so the budget still covers the whole run).
+   * pending with fresh attempts (its spend is kept, so the budget still covers the whole run). Marks the run as
+   * running under this process on disk at once, and returns state.json as it was, for putting back if the resume fails.
    */
-  private async restore(): Promise<void> {
+  private async restore(): Promise<RunState> {
     const prev = await RunStore.loadState(this.opts.repo, this.runId);
     if (prev.status === 'running' && prev.pid && prev.pid !== process.pid && pidAlive(prev.pid)) {
       throw new Error(`run ${this.runId} is still running (pid ${prev.pid})`);
@@ -218,6 +227,7 @@ export class Orchestrator {
     if (!(await this.git.branchExists(prev.integrationBranch))) {
       throw new Error(`integration branch ${prev.integrationBranch} is gone; cannot resume`);
     }
+    const onDisk = structuredClone(prev);
     prev.verifiedHead ??= await this.git.revParse(prev.integrationBranch);
     const done: string[] = [];
     const retry: string[] = [];
@@ -237,6 +247,11 @@ export class Orchestrator {
     this.tokenBaseline = prev.tokens ? prev.tokens.input + prev.tokens.output : 0;
     this.state = prev;
     this.resumeEvent = { done, retry, costUsd: prev.costUsd };
+    // Only what changes the verdict on the run: the rest of the file stays as the interrupted run left it until the
+    // first full snapshot, after the worktrees are back.
+    const { endedAt: _ended, ...claimed } = onDisk;
+    await this.store.saveState({ ...claimed, status: 'running', pid: process.pid });
+    return onDisk;
   }
 
   /** Why the run has used up what it was allowed, or undefined while it has not. */

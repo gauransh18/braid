@@ -71,7 +71,7 @@ export class Orchestrator {
     // Fail before any work starts (and before a run folder exists) if a task names an agent braid does not have.
     for (const t of this.tasks.values()) opts.drivers.get(t.driver);
     this.runId = opts.runId ?? newRunId();
-    this.git = new Git(opts.repo);
+    this.git = new Git(opts.repo, opts.signal);
     this.store = new RunStore(opts.repo, this.runId);
   }
 
@@ -143,7 +143,7 @@ export class Orchestrator {
         tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
       };
       await this.store.savePlan(plan);
-      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base);
+      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base, false);
       this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
     }
     this.state.pid = process.pid;
@@ -600,7 +600,15 @@ export class Orchestrator {
   private serialMerge(task: ResolvedTask, branch: string): Promise<{ ok: boolean; reason: string }> {
     const job = this.mergeChain.then(async () => {
       const before = await this.git.revParse('HEAD', this.integrationDir);
-      const m = await this.git.merge(this.integrationDir, branch, `braid: merge ${task.id} - ${task.title}`);
+      let m: { ok: boolean; detail: string };
+      try {
+        m = await this.git.merge(this.integrationDir, branch, `braid: merge ${task.id} - ${task.title}`);
+      } catch (err) {
+        // A Stop killed git inside the merge (a slow hook): whatever it left half-done goes, back to the last verified state.
+        await this.git.resetHard(this.integrationDir, this.state.verifiedHead ?? before);
+        if (this.opts.signal?.aborted) this.store.event('merge_aborted', { task: task.id });
+        throw err;
+      }
       this.store.event('merge', { task: task.id, ok: m.ok });
       if (!m.ok) {
         return { ok: false, reason: `Your change conflicted with work other tasks merged first.\n${tail(m.detail, 1500)}` };

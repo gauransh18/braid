@@ -107,6 +107,9 @@ function printEvent(e: HarnessEvent): void {
     case 'sandbox':
       console.log(`${t} sandbox: ${e.runtime} ${e.image}${e.agent ? ' (agent runs inside too)' : ' (setup and verify only)'}`);
       break;
+    case 'sandbox_sweep':
+      console.log(`${t} sandbox: removed ${e.count} stale container(s) left by an earlier braid that was killed`);
+      break;
     case 'run_resume':
       console.log(`${t} run resumed: ${(e.done as string[]).length} task(s) already merged, retrying ${(e.retry as string[]).join(', ') || 'none'}`);
       break;

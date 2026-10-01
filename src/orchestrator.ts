@@ -155,6 +155,7 @@ export class Orchestrator {
     else this.store.event('run_start', { base: this.state.base, integrationBranch: this.state.integrationBranch, tasks: [...this.tasks.keys()] });
     if (this.sandbox) {
       this.store.event('sandbox', { runtime: this.sandbox.runtime, image: this.sandbox.spec.image, agent: !!this.sandbox.spec.agent });
+      if (this.sandbox.swept.length) this.store.event('sandbox_sweep', { count: this.sandbox.swept.length });
     }
 
     try {

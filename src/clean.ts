@@ -208,8 +208,12 @@ async function cleanRun(repo: string, id: string, o: CleanOptions, now: number):
 
   // Worktrees first: git will not delete a branch that is checked out in one.
   const git = new Git(repo);
-  const entries = (await readdir(wtDir, { withFileTypes: true }).catch(() => [])).map((e) => e.name).sort();
+  // The run's folder can itself be a link (worktrees moved to another disk). It is never read through: whatever it
+  // points at is not braid's, so only the link goes.
+  const wtIsLink = (await lstat(wtDir).catch(() => null))?.isSymbolicLink() ?? false;
+  const entries = wtIsLink ? [] : (await readdir(wtDir, { withFileTypes: true }).catch(() => [])).map((e) => e.name).sort();
   const registered = await registeredWorktrees(repo);
+  if (wtIsLink) await act({ kind: 'leftover', name: rel(wtDir), note: 'a symlink; its target is left alone' }, () => removeDir(wtDir));
   if (entries.length) {
     for (const name of entries) {
       const path = join(wtDir, name);
@@ -229,7 +233,7 @@ async function cleanRun(repo: string, id: string, o: CleanOptions, now: number):
 
   // Whatever is checked out outside this run's folder (your own worktree) keeps its branch: git would refuse anyway,
   // and a dry run should say so too.
-  const mine = await realpath(wtDir).catch(() => resolve(wtDir));
+  const mine = wtIsLink ? resolve(wtDir) : await realpath(wtDir).catch(() => resolve(wtDir));
   const heldBy = new Map<string, string>();
   for (const [path, branch] of await registeredWorktrees(repo)) if (branch && !path.startsWith(mine + sep)) heldBy.set(branch, path);
   const dropBranch = (kind: 'task branch' | 'integration branch', name: string, note: string): Promise<void> => {
@@ -237,7 +241,9 @@ async function cleanRun(repo: string, id: string, o: CleanOptions, now: number):
     if (holder) return Promise.resolve(void out.items.push({ kind, name, note: `${note}; checked out at ${holder}`, outcome: 'kept' }));
     return act({ kind, name, note }, async () => {
       const res = await deleteBranch(repo, name);
-      if (!res.ok) return { kept: res.why };
+      // Not "kept": that is for a branch somebody holds, and it ends the run's clean-up as a success. A branch that
+      // would not go (a stale lock, no permission) is something to see and to try again.
+      if (!res.ok) throw new Error(res.why || `branch ${name} could not be deleted`);
     });
   };
 
@@ -254,6 +260,10 @@ async function cleanRun(repo: string, id: string, o: CleanOptions, now: number):
     const item = { kind: 'integration branch' as const, name: integName };
     if (state && state.integrationBranch !== integName) {
       out.items.push({ ...item, note: `state.json names ${state.integrationBranch}; left alone`, outcome: 'kept' });
+    } else if (state && state.status !== 'done' && !o.runs && !o.force) {
+      // A run that did not finish can be resumed from this branch, and a tip that merely equals its base (nothing
+      // merged yet) would read as "merged into main". Deleting it leaves a run that `braid resume` still picks and fails on.
+      out.items.push({ ...item, note: `the run is ${state.status} and can be resumed from it; --runs removes the run too, --force deletes the branch anyway`, outcome: 'kept' });
     } else {
       const holders = await mergedInto(repo, integTip);
       const was = `was ${integTip.slice(0, 7)}`;
@@ -268,8 +278,9 @@ async function cleanRun(repo: string, id: string, o: CleanOptions, now: number):
     }
   }
 
-  // Not while something above failed: the folder is what lets the next `braid clean` find this run again.
-  if (o.runs && (await exists(runDir)) && !out.items.some((i) => i.outcome === 'failed')) {
+  // Not while a branch above is still there, kept or failed to go: the folder is what lets the next `braid clean`,
+  // `braid pr` and `braid resume` find this run again.
+  if (o.runs && (await exists(runDir)) && !out.items.some((i) => i.outcome === 'failed' || i.outcome === 'kept')) {
     await act({ kind: 'run folder', name: rel(runDir) }, () => removeDir(runDir));
   }
   return out;

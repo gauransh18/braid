@@ -231,7 +231,7 @@ describe('token budget', () => {
     assert.equal((await second.orch.run()).status, 'done');
   });
 
-  it('applies a default limit when the plan sets none, so a retry loop cannot spend without end', async () => {
+  it('applies a default limit per task when the plan sets none, so a retry loop cannot spend without end', async () => {
     const repo = await makeRepo();
     const plan: PlanSpec = { goal: 'g', driver: 'mock', verify: ['node check.js'], maxAttempts: 5, tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
     // Every attempt writes a file the check rejects, and costs 4 million tokens against a default of 3 million per task.
@@ -239,12 +239,12 @@ describe('token budget', () => {
     const state = await orch.run();
     assert.equal(mock.calls.length, 1);
     assert.equal(state.tasks.a!.status, 'failed');
-    assert.match(state.tasks.a!.error!, /token budget exhausted/);
+    assert.match(state.tasks.a!.error!, /token budget exhausted for this task/);
   });
 
-  it('budgetTokens 0 turns the limit off', async () => {
+  it('taskBudgetTokens 0 turns the per-task limit off', async () => {
     const repo = await makeRepo();
-    const plan: PlanSpec = { goal: 'g', driver: 'mock', budgetTokens: 0, verify: ['node check.js'], maxAttempts: 3, tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
+    const plan: PlanSpec = { goal: 'g', driver: 'mock', taskBudgetTokens: 0, verify: ['node check.js'], maxAttempts: 3, tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
     const { orch } = orchestrator(repo, plan, (_o, i) => ({ files: { 'a.txt': i < 2 ? 'bad\n' : 'ok\n' }, tokens: { input: 4_000_000, cached: 0, output: 0 } }));
     const state = await orch.run();
     assert.equal(state.status, 'done');

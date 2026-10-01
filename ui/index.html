@@ -859,6 +859,8 @@ function runOutcome() {
   const inBraid = by('done').length + by('replaced').length;
   const name = (id) => S.plan?.tasks.find((t) => t.id === id)?.title || id;
   const first = (t) => String(t.error || 'could not finish').split('\n')[0].slice(0, 120);
+  // " (1.2M used; the limit is 1M)" from the limit message, which carries the numbers in its first parentheses.
+  const numbers = (t) => { const m = /\(([^)]*)\)/.exec(t?.error || ''); return m ? ` (${esc(m[1])})` : ''; };
   const failed = by('failed'), blocked = by('blocked'), skipped = by('skipped');
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const branch = st.integrationBranch;
@@ -868,7 +870,9 @@ function runOutcome() {
   }
   // Stopped by a limit or by an agent that ran out of usage: the tasks that never started are skipped, one caught
   // mid-retry is failed, and their dependents are blocked. Whatever else failed on its own is mentioned, not hidden.
-  const limitHit = (t) => /budget exhausted/i.test(t.error || '');
+  // A task over its own token allowance is its own failure (the others carried on); the run-wide limits stop everything.
+  const taskLimitHit = (t) => /token budget exhausted for this task/i.test(t.error || '');
+  const limitHit = (t) => /budget exhausted/i.test(t.error || '') && !taskLimitHit(t);
   const quotaHit = (t) => /agent unavailable: usage or credit limit reached/i.test(t.error || '');
   const stopped = [...failed, ...skipped].filter((t) => limitHit(t) || quotaHit(t));
   if (stopped.length) {
@@ -877,7 +881,7 @@ function runOutcome() {
     const also = alone.length ? ` ${plural(alone.length, 'task')} also failed on their own; open them to see why.` : '';
     if (stopped.some((t) => /token budget exhausted/i.test(t.error || ''))) {
       return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the token limit. ${inBraid} of ${total} strands made it in.`,
-        title: 'Stopped: the token limit was reached', detail: `Every run has a safety limit on the tokens it may use (a pool of 3 million per task in the plan unless the plan says otherwise), so a loop that keeps retrying cannot spend without end. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume gives the run a fresh allowance. To raise it, set <code>budgetTokens</code> in the plan (0 means no limit).` };
+        title: 'Stopped: the token limit was reached', detail: `This plan caps the tokens the whole run may use (<code>budgetTokens</code>), and the run reached it${numbers(stopped.find((t) => /token budget exhausted/i.test(t.error || '')))}. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume gives the run a fresh allowance. To raise it, change <code>budgetTokens</code> in the plan (0 means no limit).` };
     }
     if (stopped.some(quotaHit)) {
       return { kind: 'limit', icon: '&#9208;', label: 'agent out of usage', bubble: `The agent is out of usage. ${inBraid} of ${total} strands made it in.`,
@@ -885,6 +889,19 @@ function runOutcome() {
     }
     return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the spending limit. ${inBraid} of ${total} strands made it in.`,
       title: 'Stopped: a spending limit was reached', detail: `This run was started with a spending limit (older versions of the start screen asked for one). ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume carries on without a limit.` };
+  }
+  // One or more tasks spent their own token allowance: the run is otherwise fine, so say which, and what to change.
+  const overAllowance = failed.filter(taskLimitHit);
+  if (overAllowance.length) {
+    const lead = overAllowance[0];
+    const one = overAllowance.length === 1;
+    const others = failed.length - overAllowance.length;
+    const names = overAllowance.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>`).join(' and ') + (overAllowance.length > 2 ? ` and ${overAllowance.length - 2} more` : '');
+    const waiting = blocked.length ? ` ${plural(blocked.length, 'task')} that waited on ${one ? 'it' : 'them'} could not start.` : '';
+    const rest = others ? ` ${plural(others, 'other task')} failed on ${others === 1 ? 'its' : 'their'} own; open ${others === 1 ? 'it' : 'them'} to see why.` : '';
+    return { kind: 'limit', icon: '&#9208;', label: 'task hit its limit', bubble: `${one ? 'A strand' : plural(overAllowance.length, 'strand')} used up ${one ? 'its' : 'their'} token allowance. ${inBraid} of ${total} made it in.`,
+      title: one ? 'One task used up its token allowance' : `${overAllowance.length} tasks used up their token allowance`,
+      detail: `Each task has a safety limit on the tokens its agents may use, so one that keeps retrying cannot spend without end. ${names} reached it${one ? numbers(lead) : ''} and ${one ? 'was' : 'were'} stopped${total > overAllowance.length ? '; the other tasks carried on' : ''}.${waiting}${rest} ${inBraid} of ${total} strands are in the braid. Resume gives each unfinished task a fresh allowance. To raise it, set <code>taskBudgetTokens</code> in the plan, or <code>budgetTokens</code> on one task (0 means no limit).`, open: lead.id, openLabel: `See why: ${name(lead.id)}` };
   }
   if (failed.length) {
     const why = failed.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>: ${esc(first(t))}`).join('<br>');

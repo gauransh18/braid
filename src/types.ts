@@ -21,6 +21,8 @@ export interface TaskSpec {
   maxTurns?: number;
   /** Minutes one agent call may run before it is stopped (the attempt then fails and is retried). 0 = no limit. Overrides the plan default. */
   timeoutMin?: number;
+  /** Fresh input and output tokens this task may use across all its agent calls before it fails. 0 = no limit. Overrides `taskBudgetTokens`. */
+  budgetTokens?: number;
 }
 
 /** Run task commands (and optionally the agent) in a container. Needs Docker or Podman. */
@@ -49,9 +51,15 @@ export interface PlanSpec {
   /**
    * Stop scheduling once the run has used this many fresh input and output tokens (cached input is left out: it is
    * re-read context and costs a tenth as much). Counts from the start of each `run` or `resume`, so a resumed run
-   * gets a fresh allowance. Default: 3 million per task. 0 = no limit.
+   * gets a fresh allowance. Unset or 0 = no run-wide limit; `taskBudgetTokens` still limits each task.
    */
   budgetTokens?: number;
+  /**
+   * What one task may use, in fresh input and output tokens summed over all its agent calls (worker, resolver,
+   * reviewer, planner). A task that reaches it fails; the others carry on. Counts from when this process took the
+   * task over, so a resumed task gets a fresh allowance. Default 3 million. 0 = no limit. A task can set its own.
+   */
+  taskBudgetTokens?: number;
   /** Minutes one agent call may run before it is stopped. Default 30. 0 = no limit. A task can set its own. */
   timeoutMin?: number;
   driver?: string;

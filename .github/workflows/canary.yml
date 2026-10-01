@@ -1,0 +1,51 @@
+# Weekly check against the real agents: does braid still understand what each agent CLI prints? Agent CLIs change their
+# output without notice, and the unit tests only know the shapes we captured once. This runs a two-task plan through the
+# built braid with every agent whose API key is a repository secret (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+# NVIDIA_API_KEY) and fails when a run, a merge, the files or the token counts are not what they should be. An agent whose
+# secret is absent is skipped with a warning. See scripts/canary.mjs. Costs a few cents per agent; set the repository
+# variables CANARY_MODEL_CLAUDE, CANARY_MODEL_CODEX, CANARY_MODEL_GEMINI or CANARY_MODEL_NIM to pick cheaper models.
+name: canary
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      drivers:
+        description: 'Only these agents, comma separated (claude, codex, gemini, nim). Empty: every one that has a secret.'
+        required: false
+        default: ''
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # No secret is in the environment while dependencies and the CLIs are installed.
+      - run: npm ci
+      - run: npm run build
+      - run: npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+      - name: Run the canary
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          CANARY_MODEL_CLAUDE: ${{ vars.CANARY_MODEL_CLAUDE }}
+          CANARY_MODEL_CODEX: ${{ vars.CANARY_MODEL_CODEX }}
+          CANARY_MODEL_GEMINI: ${{ vars.CANARY_MODEL_GEMINI }}
+          CANARY_MODEL_NIM: ${{ vars.CANARY_MODEL_NIM }}
+          DRIVERS: ${{ inputs.drivers }}
+        run: node scripts/canary.mjs --require-keys --dir canary-out ${DRIVERS:+--drivers "$DRIVERS"}
+      # What braid recorded for each agent (events, transcripts), to see what changed in the output.
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: canary-runs
+          path: canary-out
+          include-hidden-files: true
+          retention-days: 14

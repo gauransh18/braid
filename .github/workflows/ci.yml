@@ -24,3 +24,17 @@ jobs:
         if: ${{ !cancelled() }}
       - run: node scripts/smoke.mjs
         if: ${{ !cancelled() }}
+  # The desktop app's Rust tests. macOS needs no extra libraries (Linux would need WebKitGTK); Windows runs them in
+  # desktop-windows.yml. A path filter on one job is not possible, so it always runs; the cache makes it cheap once warm.
+  desktop-rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop/src-tauri }
+      # tauri-build refuses to compile without the sidecar the bundle would ship. The tests never start it, so an empty file stands in.
+      - run: |
+          mkdir -p desktop/src-tauri/binaries
+          touch "desktop/src-tauri/binaries/braid-$(rustc -vV | sed -n 's/^host: //p')"
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml

@@ -1,6 +1,7 @@
 import { lstat, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { Git } from './git.js';
+import { hostIdentity } from './host.js';
 import { exec, pidAlive } from './proc.js';
 import { stateRoot } from './store.js';
 import type { RunState } from './types.js';
@@ -63,13 +64,16 @@ export type Verdict = { clean: true; endedMs?: number } | { clean: false; reason
 
 /**
  * Whether a run's leftovers may go. Only a run that is provably over qualifies: done, failed or aborted, or marked
- * running by a process that no longer exists. A pid that cannot be told apart from a live one (EPERM) counts as live.
+ * running by a process that no longer exists. A pid that cannot be told apart from a live one (EPERM), or that was
+ * recorded somewhere else (another host or PID namespace, which `alive` cannot see into), counts as live.
  */
-export function judgeRun(id: string, state: RunState, mtimeMs: number, now: number, olderMs?: number, alive: (pid: number) => boolean = pidAlive): Verdict {
+export function judgeRun(id: string, state: RunState, mtimeMs: number, now: number, olderMs?: number, alive: (pid: number) => boolean = pidAlive, here: string = hostIdentity()): Verdict {
   if (state.runId !== id) return { clean: false, reason: `state.json belongs to run ${state.runId}` };
   let endedMs: number | undefined;
   if (state.status === 'running') {
     if (!state.pid) return { clean: false, reason: 'marked running, and its process is not recorded' };
+    // A pid recorded on another machine, in a dev container or in WSL cannot be looked up here, and the repository may be shared with it.
+    if (state.host && state.host !== here) return { clean: false, reason: `marked running by pid ${state.pid} on another host or container (${state.host}), where it may still be alive` };
     if (alive(state.pid)) return { clean: false, reason: `still running (pid ${state.pid})` };
     endedMs = mtimeMs; // a crashed run never wrote an end time: the last save is the last sign of life
   } else if (state.status === 'done' || state.status === 'failed' || state.status === 'aborted') {

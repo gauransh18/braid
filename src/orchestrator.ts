@@ -5,6 +5,7 @@ import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
 import { terminalHint } from './hints.js';
 import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
+import { hostIdentity } from './host.js';
 import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
 import { readFile } from 'node:fs/promises';
@@ -173,6 +174,7 @@ export class Orchestrator {
         this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
       }
       this.state.pid = process.pid;
+      this.state.host = hostIdentity();
       await this.save();
       setup = await this.runSetup(this.integrationDir);
     } catch (err) {
@@ -250,7 +252,7 @@ export class Orchestrator {
     // Only what changes the verdict on the run: the rest of the file stays as the interrupted run left it until the
     // first full snapshot, after the worktrees are back.
     const { endedAt: _ended, ...claimed } = onDisk;
-    await this.store.saveState({ ...claimed, status: 'running', pid: process.pid });
+    await this.store.saveState({ ...claimed, status: 'running', pid: process.pid, host: hostIdentity() });
     return onDisk;
   }
 

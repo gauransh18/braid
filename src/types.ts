@@ -164,6 +164,8 @@ export interface RunState {
   verifiedHead?: string;
   /** Process driving the run, so resume can refuse a run that is still alive. */
   pid?: number;
+  /** Where `pid` is from (host name and PID namespace; see hostIdentity). Another place's pid cannot be looked up here. Absent in runs recorded by older versions. */
+  host?: string;
   resumes?: number;
   /** Planner calls made to replace failed tasks. */
   replans?: number;

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { cleanCommand, cleanRepo, type CleanReport } from '../src/clean.js';
+import { cleanCommand, cleanRepo, judgeRun, type CleanReport } from '../src/clean.js';
+import { hostIdentity } from '../src/host.js';
+import type { RunState } from '../src/types.js';
 import { git, gitOut, makeRepo, makeRun, tmp } from './clean-and-pr-fixtures.js';
 
 const branches = async (repo: string) => (await gitOut(repo, 'for-each-ref', '--format=%(refname:short)', 'refs/heads')).split('\n').filter(Boolean).sort();
@@ -144,3 +146,32 @@ function lstatExists(path: string): boolean {
     return false;
   }
 }
+
+describe('braid clean and a run recorded on another host', () => {
+  const running = (extra: Partial<RunState> = {}): RunState => ({ runId: 'r', repo: '/x', base: 'main', integrationBranch: 'braid/r/integration', status: 'running', costUsd: 0, createdAt: '', pid: 999_999, tasks: {}, ...extra });
+  const dead = () => false;
+
+  it('does not take a run for crashed because its pid is not alive here, when the pid was recorded elsewhere', () => {
+    const elsewhere = judgeRun('r', running({ host: 'build-box' }), 0, 0, undefined, dead, 'my-laptop');
+    assert.equal(elsewhere.clean, false);
+    assert.match((elsewhere as { reason: string }).reason, /another host or container \(build-box\), where it may still be alive/);
+    // The same place: a pid that is gone is a crash. And a run recorded before hosts were noted keeps the old judgement.
+    assert.equal(judgeRun('r', running({ host: 'my-laptop' }), 0, 0, undefined, dead, 'my-laptop').clean, true);
+    assert.equal(judgeRun('r', running(), 0, 0, undefined, dead, 'my-laptop').clean, true);
+    assert.equal(judgeRun('r', running({ status: 'failed', endedAt: new Date().toISOString(), host: 'build-box' }), 0, 0, undefined, dead, 'my-laptop').clean, true, 'a run that ended is over wherever it ran');
+  });
+
+  it('leaves such a run, with its worktrees and branches, alone', async () => {
+    const repo = await makeRepo();
+    const id = '20260101-000001-shared';
+    await makeRun(repo, id, { kept: ['a'], integrationCommits: 1, status: 'running', pid: 2 ** 22 + 7 });
+    const file = join(runFolder(repo, id), 'state.json');
+    const state = JSON.parse(readFileSync(file, 'utf8')) as RunState;
+    writeFileSync(file, JSON.stringify({ ...state, host: `${hostIdentity()}-other` }));
+
+    const report = await cleanRepo(repo, { runs: true });
+    assert.match(report.runs.find((r) => r.runId === id)!.skipped!, /another host or container/);
+    assert.ok((await branches(repo)).includes(`braid/${id}/task-a`));
+    assert.ok(existsSync(join(repo, '.braid', 'worktrees', id, 'a')));
+  });
+});

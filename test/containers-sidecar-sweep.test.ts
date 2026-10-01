@@ -9,6 +9,7 @@ import { MockDriver } from '../src/drivers/mock.js';
 import { Git } from '../src/git.js';
 import { Orchestrator } from '../src/orchestrator.js';
 import { exec } from '../src/proc.js';
+import { hostIdentity } from '../src/host.js';
 import { Sandbox, sweepStale } from '../src/sandbox.js';
 import type { HarnessEvent } from '../src/store.js';
 import type { PlanSpec } from '../src/types.js';
@@ -60,6 +61,7 @@ if (a[0] === 'rm') process.exit(read('rm-fails.txt').split('\\n').includes(a[a.l
   return { bin, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[]) : []) };
 }
 
+const here = hostIdentity();
 const removals = (calls: string[][]) => calls.filter((c) => c[0] === 'rm').map((c) => c.join(' '));
 
 describe('sandbox container labels', () => {
@@ -67,7 +69,7 @@ describe('sandbox container labels', () => {
     const sb = Sandbox.withRuntime({ image: 'node:22', agent: true }, 'docker');
     for (const { args } of [sb.command('/x', 'true', 'verify'), sb.command('/x', 'true', 'setup'), sb.agentWrap('/x')!({ cmd: 'claude', args: ['-p'] })]) {
       const labels = args.flatMap((a, i) => (args[i - 1] === '--label' ? [a] : []));
-      assert.deepEqual(labels, ['braid=1', `braid.pid=${process.pid}`]);
+      assert.deepEqual(labels, ['braid=1', `braid.pid=${process.pid}`, `braid.host=${here}`]);
       assert.ok(args.indexOf('--label') < args.indexOf('--entrypoint'), 'labels are options of `run`, not arguments of the command');
     }
   });
@@ -77,45 +79,62 @@ describe('sweeping stale containers', { skip: process.platform === 'win32' && 's
   it('removes the containers of a braid that is gone, and leaves ours and live ones alone', async () => {
     const dead = deadPid();
     const rt = fakeRuntime([
-      `aaaa1111 ${dead}`, // stale
-      `bbbb2222 ${process.pid}`, // started by this very process
-      `cccc3333 ${process.ppid}`, // started by a braid that is still running
-      `dddd4444 ${dead}`, // stale
+      `aaaa1111 ${dead} ${here}`, // stale
+      `bbbb2222 ${process.pid} ${here}`, // started by this very process
+      `cccc3333 ${process.ppid} ${here}`, // started by a braid that is still running
+      `dddd4444 ${dead} ${here}`, // stale
     ]);
     const removed = await sweepStale(rt.bin);
     assert.deepEqual(removed, ['aaaa1111', 'dddd4444']);
     const calls = rt.calls();
-    assert.deepEqual(calls[0], ['ps', '-a', '--filter', 'label=braid', '--format', '{{.ID}} {{.Label "braid.pid"}}']);
+    assert.deepEqual(calls[0], ['ps', '-a', '--filter', 'label=braid', '--format', '{{.ID}} {{.Label "braid.pid"}} {{.Label "braid.host"}}']);
     assert.deepEqual(removals(calls), ['rm -f aaaa1111', 'rm -f dddd4444']);
+  });
+
+  it('leaves alone a container from another host or PID namespace, or with no host recorded, even though its pid is not here', async () => {
+    const dead = deadPid();
+    const rt = fakeRuntime([
+      `aaaa1111 ${dead} some-build-host`, // another machine on the same daemon: its pid exists there, not here
+      `bbbb2222 ${dead}`, // no host recorded, so there is no saying where the pid is from
+      `cccc3333 ${dead} ${here}x`, // not the same place, only alike
+      `dddd4444 ${dead} ${here}`, // ours to judge, and stale
+    ]);
+    assert.deepEqual(await sweepStale(rt.bin), ['dddd4444']);
+    assert.deepEqual(removals(rt.calls()), ['rm -f dddd4444']);
+  });
+
+  it('knows its own place as one word that stays the same', () => {
+    assert.match(here, /^[A-Za-z0-9.-]+(:\d+)?$/);
+    assert.equal(hostIdentity(), here);
   });
 
   it('ignores rows it cannot read, and ids that are not hex ids', async () => {
     const dead = deadPid();
-    const rt = fakeRuntime(['', 'garbage', `eeee5555`, `eeee5556 `, `eeee5557 not-a-pid`, `eeee5558 0`, `eeee5559 -${dead}`, `eeee555a ${dead} extra`, `--force ${dead}`, `x;rm ${dead}`, `ffff6666 ${dead}`]);
+    const rt = fakeRuntime(['', 'garbage', `eeee5555`, `eeee5556 `, `eeee5557 not-a-pid`, `eeee5558 0`, `eeee5559 -${dead}`, `eeee555a ${dead} extra`, `--force ${dead}`, `x;rm ${dead}`, `ffff6666 ${dead} ${here}`]);
     assert.deepEqual(await sweepStale(rt.bin), ['ffff6666']);
     assert.deepEqual(removals(rt.calls()), ['rm -f ffff6666']);
   });
 
   it('counts only what the runtime really removed, and carries on past one it could not', async () => {
     const dead = deadPid();
-    const rt = fakeRuntime([`aaaa1111 ${dead}`, `bbbb2222 ${dead}`, `cccc3333 ${dead}`], { rmFails: ['bbbb2222'] });
+    const rt = fakeRuntime([`aaaa1111 ${dead} ${here}`, `bbbb2222 ${dead} ${here}`, `cccc3333 ${dead} ${here}`], { rmFails: ['bbbb2222'] });
     assert.deepEqual(await sweepStale(rt.bin), ['aaaa1111', 'cccc3333']);
     assert.equal(removals(rt.calls()).length, 3);
   });
 
   it('never throws: no runtime, a runtime that cannot list, or a run that is already stopped', async () => {
     assert.deepEqual(await sweepStale('/nonexistent/docker'), []);
-    const down = fakeRuntime([`aaaa1111 ${deadPid()}`], { psFails: true });
+    const down = fakeRuntime([`aaaa1111 ${deadPid()} ${here}`], { psFails: true });
     assert.deepEqual(await sweepStale(down.bin), []);
     assert.deepEqual(removals(down.calls()), []);
-    const live = fakeRuntime([`aaaa1111 ${deadPid()}`]);
+    const live = fakeRuntime([`aaaa1111 ${deadPid()} ${here}`]);
     assert.deepEqual(await sweepStale(live.bin, AbortSignal.abort()), []);
     assert.deepEqual(removals(live.calls()), []);
   });
 
   it('runs once from Sandbox.create, after the runtime has answered, and keeps the ids', async () => {
     const dead = deadPid();
-    const rt = fakeRuntime([`aaaa1111 ${dead}`, `bbbb2222 ${process.pid}`]);
+    const rt = fakeRuntime([`aaaa1111 ${dead} ${here}`, `bbbb2222 ${process.pid} ${here}`]);
     process.env.BRAID_CONTAINER_RUNTIME = rt.bin;
     try {
       const sb = await Sandbox.create({ image: 'node:22' });
@@ -166,9 +185,9 @@ describe('sweeping stale containers', { skip: process.platform === 'win32' && 's
       return events;
     }
     const dead = deadPid();
-    const swept = (await runWith([`aaaa1111 ${dead}`, `bbbb2222 ${dead}`])).filter((e) => e.type === 'sandbox_sweep');
+    const swept = (await runWith([`aaaa1111 ${dead} ${here}`, `bbbb2222 ${dead} ${here}`])).filter((e) => e.type === 'sandbox_sweep');
     assert.equal(swept.length, 1);
     assert.equal(swept[0]!.count, 2);
-    assert.ok(!(await runWith([`cccc3333 ${process.ppid}`])).some((e) => e.type === 'sandbox_sweep'));
+    assert.ok(!(await runWith([`cccc3333 ${process.ppid} ${here}`])).some((e) => e.type === 'sandbox_sweep'));
   });
 });

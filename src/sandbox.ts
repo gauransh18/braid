@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { hostIdentity } from './host.js';
 import { abortError, exec, pidAlive } from './proc.js';
 import type { SandboxSpec } from './types.js';
 
@@ -72,6 +73,9 @@ export class Sandbox {
       'braid=1',
       '--label',
       `braid.pid=${process.pid}`,
+      // A pid means nothing outside the machine and PID namespace it was read in, and the container daemon may be shared.
+      '--label',
+      `braid.host=${hostIdentity()}`,
       ...(o.interactive ? ['-i'] : []),
       '--cap-drop',
       'ALL',
@@ -131,19 +135,23 @@ function containerName(): string {
 
 /**
  * Containers outlive a braid that was killed outright (SIGKILL, a crash, power loss): `--rm` and the removal by name only
- * run while braid does. Each container carries the pid of the braid that started it, so one whose pid is gone is stale.
- * Never touches our own pid or a live one, skips rows it cannot read, and never throws: housekeeping must not stop a run.
- * Returns the ids it removed.
+ * run while braid does. Each container carries the pid of the braid that started it and the place that pid is from
+ * (hostIdentity), so one whose pid is gone, in the same place, is stale. A container from anywhere else, or with no
+ * place recorded, is not ours to judge: several machines can share one daemon (a remote DOCKER_HOST, Docker Desktop
+ * under Windows and WSL, a dev container with the socket mounted), and there its owner's pid does not exist here.
+ * Never touches our own pid or a live one, skips rows it cannot read, and never throws: housekeeping must not stop a
+ * run. Returns the ids it removed.
  */
 export async function sweepStale(runtime: string, signal?: AbortSignal): Promise<string[]> {
   const removed: string[] = [];
   try {
-    const list = await exec(runtime, ['ps', '-a', '--filter', 'label=braid', '--format', '{{.ID}} {{.Label "braid.pid"}}'], { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
+    const list = await exec(runtime, ['ps', '-a', '--filter', 'label=braid', '--format', '{{.ID}} {{.Label "braid.pid"}} {{.Label "braid.host"}}'], { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
     if (list.code !== 0) return removed;
+    const here = hostIdentity();
     for (const row of list.stdout.split('\n')) {
-      const m = /^\s*([0-9a-f]{4,64})\s+(\d+)\s*$/i.exec(row);
+      const m = /^\s*([0-9a-f]{4,64})\s+(\d+)\s+(\S+)\s*$/i.exec(row);
       const pid = m ? Number(m[2]) : 0;
-      if (!m || !Number.isSafeInteger(pid) || pid < 1 || pid === process.pid || pidAlive(pid)) continue;
+      if (!m || m[3] !== here || !Number.isSafeInteger(pid) || pid < 1 || pid === process.pid || pidAlive(pid)) continue;
       if (signal?.aborted) break;
       const rm = await exec(runtime, ['rm', '-f', m[1]!], { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
       if (rm.code === 0) removed.push(m[1]!);

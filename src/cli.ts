@@ -9,6 +9,7 @@ import { GeminiDriver } from './drivers/gemini.js';
 import { MockDriver } from './drivers/mock.js';
 import { NIM_DEFAULT_MODEL, OpenAICompatDriver } from './drivers/openai-compat.js';
 import { createDemoRun } from './demo.js';
+import { cleanCommand } from './clean.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
 import { Git } from './git.js';
 import { fetchModels, isProvider, testProvider } from './models.js';
@@ -20,6 +21,7 @@ import { Orchestrator } from './orchestrator.js';
 import { describeTokens } from './tokens.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
+import { prCommand } from './pr.js';
 import { killAllChildren } from './proc.js';
 import { parentIsExplorer } from './winhelp.js';
 import { RunStore, stateRoot, type HarnessEvent } from './store.js';
@@ -48,6 +50,13 @@ Usage:
   braid doctor [--json]          check that git and an agent CLI are installed
   braid status [runId]
   braid runs
+  braid clean [--older 7d|12h] [--dry-run] [--integration [--force]] [--runs]
+                                 remove the kept worktrees and task branches of finished runs; --integration also
+                                 deletes integration branches merged into another branch of yours (--force: unmerged
+                                 ones too), --runs the run folders; --dry-run only lists what would go
+  braid pr [runId] [--base BRANCH] [--draft] [--remote origin] [--dry-run] [--allow-partial]
+                                 push a run's integration branch and open a pull request with gh; the newest run
+                                 with an integration branch unless named; failed or aborted runs need --allow-partial
 
 Runs never touch your branches. Work lands on braid/<runId>/integration;
 review it and merge it yourself.`;
@@ -235,6 +244,15 @@ async function main(argv: string[]): Promise<number> {
       'task-budget-tokens': { type: 'string' },
       timeout: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
+      older: { type: 'string' },
+      'dry-run': { type: 'boolean' },
+      integration: { type: 'boolean' },
+      force: { type: 'boolean' },
+      runs: { type: 'boolean' },
+      base: { type: 'string' },
+      draft: { type: 'boolean' },
+      remote: { type: 'string' },
+      'allow-partial': { type: 'boolean' },
       watch: { type: 'boolean' },
       port: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
@@ -384,6 +402,14 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
       console.log(`${id}  ${s?.status ?? 'unknown'}  ${describeTokens(s?.tokens, false)}`);
     }
     return 0;
+  }
+
+  if (cmd === 'clean') {
+    return cleanCommand(repo, arg, { older: values.older, dryRun: values['dry-run'], integration: values.integration, force: values.force, runs: values.runs });
+  }
+
+  if (cmd === 'pr') {
+    return prCommand(repo, arg, { base: values.base, draft: values.draft, remote: values.remote, dryRun: values['dry-run'], allowPartial: values['allow-partial'] });
   }
 
   console.error(USAGE);

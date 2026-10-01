@@ -59,6 +59,18 @@ describe('spawnable', () => {
     assert.equal(s.args[3], '"C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd -p --allowedTools "Read,Edit,Bash(npm test)" --model sonnet"');
   });
 
+  it('refuses an argument that cmd.exe would read as a second command, instead of quoting it wrong', () => {
+    const w = windows(['C:\\Users\\me\\AppData\\Roaming\\npm\\gh.cmd']);
+    // A quote ends the quoted part for cmd.exe (a backslash does not escape it), so the & after it would run `calc`.
+    for (const bad of ['x" & calc & "', 'say "hi"', '100% done', '%PATH%', 'first\nsecond', 'first\r\nsecond', 'nul\0byte']) {
+      assert.throws(() => spawnable('gh', ['pr', 'create', '--title', bad], w), /\.cmd or \.bat wrapper.*cannot be given an argument/s, JSON.stringify(bad));
+    }
+    // What can be quoted is still quoted, and the refusal is only for cmd.exe.
+    assert.equal(spawnable('gh', ['--title', 'a & b (c)'], w).args[3], '"C:\\Users\\me\\AppData\\Roaming\\npm\\gh.cmd --title "a & b (c)""');
+    assert.deepEqual(spawnable('gh', ['--title', 'say "hi" & 100%\nx'], windows(['C:\\Program Files\\Git\\cmd\\gh.exe'])), { cmd: 'C:\\Program Files\\Git\\cmd\\gh.exe', args: ['--title', 'say "hi" & 100%\nx'] });
+    assert.deepEqual(spawnable('gh', ['--title', 'say "hi"'], { platform: 'linux' }), { cmd: 'gh', args: ['--title', 'say "hi"'] });
+  });
+
   it('starts an .exe directly, and leaves an unknown program for spawn to report', () => {
     const w = windows(['C:\\Program Files\\Git\\cmd\\git.exe']);
     assert.deepEqual(spawnable('git', ['--version'], w), { cmd: 'C:\\Program Files\\Git\\cmd\\git.exe', args: ['--version'] });

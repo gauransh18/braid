@@ -178,8 +178,13 @@ export async function prCommand(repo: string, arg: string | undefined, flags: Pr
   const title = prTitle(state, plan);
   const body = renderPrBody(state, plan);
   const pushArgs = ['push', '-u', remote, head];
-  const ghArgs = ['pr', 'create', '--base', base, '--head', head, '--title', title, '--body', body, ...(flags.draft ? ['--draft'] : [])];
-  const commands = [`git ${pushArgs.map(shellQuote).join(' ')}`, `gh ${ghArgs.map(shellQuote).join(' ')}`];
+  // The body goes in on standard input: it is long, it has line breaks, and a .cmd wrapper on Windows runs through
+  // cmd.exe, which cannot be given such an argument safely. The title is one line (see prTitle).
+  const ghArgs = ['pr', 'create', '--base', base, '--head', head, '--title', title, '--body-file', '-', ...(flags.draft ? ['--draft'] : [])];
+  // What is printed for a person is not a command to paste: free text cannot be quoted for every shell (PowerShell, cmd
+  // and POSIX sh differ), so the title and body are shown as text and the way to finish is to run braid again.
+  const again = `braid pr ${id}${flags.base !== undefined ? ` --base ${shellQuote(flags.base)}` : ''}${flags.remote !== undefined ? ` --remote ${shellQuote(flags.remote)}` : ''}${flags.draft ? ' --draft' : ''}${flags.allowPartial ? ' --allow-partial' : ''}`;
+  const commands = [`git ${pushArgs.map(shellQuote).join(' ')}`, `gh pr create --base ${shellQuote(base)} --head ${shellQuote(head)} --title <the title above> --body-file -${flags.draft ? ' --draft' : ''}   (the body above goes in on standard input)`];
   const ghBin = process.env.BRAID_GH_BIN ?? 'gh';
   const haveGh = findExecutable(ghBin) !== null;
 
@@ -199,7 +204,7 @@ export async function prCommand(repo: string, arg: string | undefined, flags: Pr
     io.err('braid: gh (the GitHub CLI) is not installed, so nothing was pushed and no pull request was opened.');
     describe();
     const url = githubCompareUrl((await exec('git', ['remote', 'get-url', remote], { cwd: repo, allowFail: true })).stdout, base, head);
-    io.out(url ? `\nor push the branch and open the pull request in the browser:\n  ${commands[0]}\n  ${url}` : '\nInstall gh (https://cli.github.com), then run the two commands above.');
+    io.out(url ? `\nor push the branch and open the pull request in the browser:\n  ${commands[0]}\n  ${url}` : `\nInstall gh (https://cli.github.com), then run: ${again}`);
     return 1;
   }
 
@@ -212,10 +217,10 @@ export async function prCommand(repo: string, arg: string | undefined, flags: Pr
   }
   io.out(`pushed ${head} to ${remote}`);
 
-  const gh = await exec(ghBin, ghArgs, { cwd: repo, allowFail: true, timeoutMs: 120_000, env: { GH_PROMPT_DISABLED: '1' } }).catch((err: Error) => ({ code: 1, stdout: '', stderr: err.message }));
+  const gh = await exec(ghBin, ghArgs, { cwd: repo, allowFail: true, input: body, timeoutMs: 120_000, env: { GH_PROMPT_DISABLED: '1' } }).catch((err: Error) => ({ code: 1, stdout: '', stderr: err.message }));
   if (gh.code !== 0) {
     io.err(`braid: gh pr create failed: ${(gh.stderr.trim() || gh.stdout.trim() || 'timed out').split(/\r?\n/).slice(-3).join(' ')}`);
-    io.err(`${head} is on ${remote}. Once that is sorted out, open the pull request with:\n  ${commands[1]}`);
+    io.err(`${head} is on ${remote}. Once that is sorted out, open the pull request by running this again (the push is then a no-op):\n  ${again}`);
     return 1;
   }
   io.out(gh.stdout.trim());

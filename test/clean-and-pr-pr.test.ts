@@ -159,9 +159,15 @@ describe('braid pr', { skip: process.platform === 'win32' && 'stand-in gh is a s
     writeFileSync(
       bin,
       `#!/usr/bin/env node
-require('node:fs').appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
-if (process.env.FAKE_GH_FAIL) { console.error(process.env.FAKE_GH_FAIL); process.exit(1); }
-console.log('https://github.com/acme/widgets/pull/7');
+const fs = require('node:fs');
+fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+let body = '';
+process.stdin.on('data', (d) => (body += d));
+process.stdin.on('end', () => {
+  fs.writeFileSync(process.env.FAKE_GH_LOG + '.body', body);
+  if (process.env.FAKE_GH_FAIL) { console.error(process.env.FAKE_GH_FAIL); process.exit(1); }
+  console.log('https://github.com/acme/widgets/pull/7');
+});
 `,
     );
     chmodSync(bin, 0o755);
@@ -177,6 +183,8 @@ console.log('https://github.com/acme/widgets/pull/7');
   });
 
   const ghCalls = (): string[][] => (existsSync(ghLog) ? readFileSync(ghLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  /** What the stand-in gh read on standard input in its last call. */
+  const ghBody = (): string => (existsSync(`${ghLog}.body`) ? readFileSync(`${ghLog}.body`, 'utf8') : '');
   const ID = '20260101-120000-ab12';
   const BRANCH = `braid/${ID}/integration`;
 
@@ -207,9 +215,8 @@ console.log('https://github.com/acme/widgets/pull/7');
     assert.equal(await gitOut(repo, 'rev-parse', 'main'), mainBefore, 'and the local base did not move');
     const calls = ghCalls();
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0]!.slice(0, 10), ['pr', 'create', '--base', 'main', '--head', BRANCH, '--title', 'Add rate limiting', '--body', calls[0]![9]]);
-    assert.match(calls[0]![9]!, /^braid run `20260101-120000-ab12`: 2 of 2 tasks merged/);
-    assert.equal(calls[0]!.length, 10, 'no --draft unless asked');
+    assert.deepEqual(calls[0], ['pr', 'create', '--base', 'main', '--head', BRANCH, '--title', 'Add rate limiting', '--body-file', '-'], 'no --draft unless asked');
+    assert.match(ghBody(), /^braid run `20260101-120000-ab12`: 2 of 2 tasks merged/, 'the body went in on standard input');
   });
 
   it('--draft, --base and --remote reach gh and git as given', async () => {
@@ -236,8 +243,7 @@ console.log('https://github.com/acme/widgets/pull/7');
     assert.match(res.out, /title: Add rate limiting/);
     assert.match(res.out, /body:\nbraid run `20260101-120000-ab12`: 2 of 2 tasks merged/);
     assert.ok(res.out.includes(`  git push -u origin ${BRANCH}\n`));
-    assert.match(res.out, new RegExp(`  gh pr create --base main --head ${BRANCH} --title 'Add rate limiting' --body '[^']*braid run`));
-    assert.match(res.out, / --draft$/m);
+    assert.match(res.out, new RegExp(`  gh pr create --base main --head ${BRANCH} --title <the title above> --body-file - --draft {3}\\(the body above goes in on standard input\\)`));
     assert.equal(await gitOut(origin, 'for-each-ref'), refs);
     assert.equal(await gitOut(repo, 'config', '--local', '--list'), config);
     assert.deepEqual(ghCalls(), []);
@@ -255,7 +261,7 @@ console.log('https://github.com/acme/widgets/pull/7');
     assert.equal(res.code, 1);
     assert.match(res.err, /gh \(the GitHub CLI\) is not installed, so nothing was pushed/);
     assert.ok(res.out.includes(`git push -u origin ${BRANCH}`));
-    assert.match(res.out, /gh pr create --base main --head \S+ --title 'Add rate limiting' --body '/);
+    assert.match(res.out, /gh pr create --base main --head \S+ --title <the title above> --body-file -/);
     assert.ok(res.out.includes(`https://github.com/acme/widgets/compare/main...${BRANCH}?expand=1`));
     assert.equal(await remoteHas(origin, `refs/heads/${BRANCH}`), '', 'nothing was pushed');
     assert.deepEqual(ghCalls(), []);
@@ -325,7 +331,7 @@ console.log('https://github.com/acme/widgets/pull/7');
     assert.equal(res.code, 0, res.err);
     const [call] = ghCalls();
     assert.equal(call![7], title, 'the title is the first line of the goal, byte for byte');
-    assert.ok(call![9]!.includes('$(touch pwned)') && call![9]!.includes('echo "$HOME" && touch pwned'));
+    assert.ok(ghBody().includes('$(touch pwned)') && ghBody().includes('echo "$HOME" && touch pwned'));
     assert.ok(!existsSync(marker), 'nothing ran');
   });
 
@@ -384,7 +390,34 @@ console.log('https://github.com/acme/widgets/pull/7');
     const res = await pr(repo);
     assert.equal(res.code, 1);
     assert.match(res.err, /gh pr create failed: HTTP 401: Bad credentials/);
-    assert.match(res.err, new RegExp(`${BRANCH} is on origin\\. .*\\n  gh pr create --base main --head ${BRANCH}`));
+    assert.match(res.err, new RegExp(`${BRANCH} is on origin\\. .*\\n  braid pr ${ID}$`));
     assert.ok(await remoteHas(origin, `refs/heads/${BRANCH}`));
+  });
+
+  it('hands gh the title as one argument and the body on standard input, whatever characters they hold', async () => {
+    const { repo } = await makeRepoWithOrigin();
+    await finished(repo, { goal: `Fix "quoted" 100% & it's $(touch x)\nsecond line of the goal` });
+    const res = await pr(repo);
+    assert.equal(res.code, 0, res.err);
+    const [call] = ghCalls();
+    assert.equal(call!.length, 10);
+    assert.equal(call![7], `Fix "quoted" 100% & it's $(touch x)`);
+    assert.ok(!call!.some((a) => a.includes('braid run') || a.includes('second line')), 'no free text beyond the title is on the command line');
+    assert.match(ghBody(), /second line of the goal/);
+  });
+
+  it('says how to finish by running braid again, which no shell has to quote', async () => {
+    const { repo } = await makeRepoWithOrigin();
+    await finished(repo, { goal: "Fix user's login" });
+    process.env.FAKE_GH_FAIL = 'HTTP 401: Bad credentials (gh auth login)';
+    const res = await pr(repo, undefined, { draft: true, remote: 'origin', base: 'main' });
+    assert.equal(res.code, 1);
+    assert.match(res.err, new RegExp(`\\n  braid pr ${ID} --base main --remote origin --draft$`));
+    assert.doesNotMatch(res.err, /Fix user|'\\''/, 'no command with the title in it for a particular shell to misread');
+
+    process.env.BRAID_GH_BIN = join(tmp('braid-nogh-'), 'gh');
+    const missing = await pr(repo);
+    assert.doesNotMatch(missing.out, /'\\''/);
+    assert.match(missing.out, new RegExp(`Install gh .* then run: braid pr ${ID}$`));
   });
 });

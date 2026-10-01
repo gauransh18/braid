@@ -19,9 +19,11 @@ after(() => {
   for (const d of temps) rmSync(d, { recursive: true, force: true });
 });
 
-function canary(args: string[], env: Record<string, string | undefined> = {}) {
+/** Runs the script in a work folder of its own, which it keeps when something fails, and the test removes. */
+function canary(args: string[], env: Record<string, string | undefined> = {}, dir = mkdtempSync(join(tmpdir(), 'braid-canary-test-'))) {
+  temps.push(dir);
   return new Promise<{ code: number | null; out: string }>((resolve) => {
-    const child = spawn(process.execPath, [SCRIPT, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [SCRIPT, ...args, '--dir', dir], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));
@@ -35,8 +37,7 @@ const NO_AGENTS = { BRAID_CLAUDE_BIN: '/nonexistent/claude', BRAID_CODEX_BIN: '/
 describe('the canary script', { skip }, () => {
   it('passes on every driver when the agents print what braid expects, and leaves real work behind', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'braid-canary-test-'));
-    temps.push(dir);
-    const { code, out } = await canary(['--fake', '--dir', dir]);
+    const { code, out } = await canary(['--fake'], {}, dir);
     assert.equal(code, 0, out);
     for (const name of ['claude', 'codex', 'gemini', 'nim']) assert.match(out, new RegExp(`^ok   ${name}`, 'm'), out);
     assert.match(out, /4 passed, 0 failed, 0 skipped/);

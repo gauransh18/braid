@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -62,6 +63,28 @@ describe('watch server', () => {
     assert.match((await get(w.url)).body, /braid watch/);
     const runs = JSON.parse((await get(w.url + 'api/runs')).body);
     assert.deepEqual(runs.map((r: { runId: string; status: string }) => [r.runId, r.status]), [[RUN, 'running']]);
+  });
+
+  it('shows a run whose process is gone as stopped, so the dashboard can offer Resume', async () => {
+    // A force-quit, a crash or a killed app leaves state.json saying "running" for ever.
+    const gone = spawnSync(process.execPath, ['-e', '']).pid!;
+    const id = '20260101-130000-dead';
+    const dir = join(repo, '.braid', 'runs', id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'plan.json'), JSON.stringify({ goal: 'g', tasks: [] }));
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ runId: id, status: 'running', pid: gone, costUsd: 0, tasks: {} }));
+    writeFileSync(join(dir, 'events.jsonl'), '');
+    try {
+      const runs = JSON.parse((await get(w.url + 'api/runs')).body) as { runId: string; status: string }[];
+      assert.equal(runs.find((r) => r.runId === id)!.status, 'aborted');
+      assert.equal(JSON.parse((await get(`${w.url}api/run/${id}`)).body).state.status, 'aborted');
+      assert.match(await sse(`${w.url}api/run/${id}/events`, /event: state/), /"status":"aborted"/);
+      // A live process (this one) keeps its run "running".
+      writeFileSync(join(dir, 'state.json'), JSON.stringify({ runId: id, status: 'running', pid: process.pid, costUsd: 0, tasks: {} }));
+      assert.equal(JSON.parse((await get(`${w.url}api/run/${id}`)).body).state.status, 'running');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('returns plan, state and ordered task logs', async () => {

@@ -8,6 +8,8 @@ export interface MockStep {
   /** Files to write, relative to the worktree. */
   files?: Record<string, string>;
   text?: string;
+  /** What the provider itself said when `ok` is false (defaults to `text`). Set apart to script agent prose around a failure. */
+  error?: string;
   ok?: boolean;
   costUsd?: number;
   tokens?: TokenUsage;
@@ -22,10 +24,13 @@ export interface MockStep {
  * the default writes nothing and approves (so reviewers pass).
  */
 export class MockDriver implements Driver {
-  readonly name = 'mock';
   readonly calls: DriverRunOptions[] = [];
 
-  constructor(private readonly script: (opts: DriverRunOptions, callIndex: number) => MockStep = () => ({})) {}
+  constructor(
+    private readonly script: (opts: DriverRunOptions, callIndex: number) => MockStep = () => ({}),
+    /** Register several under different names to stand in for different agents. */
+    readonly name = 'mock',
+  ) {}
 
   async run(opts: DriverRunOptions): Promise<AgentResult> {
     const step = this.script(opts, this.calls.length);
@@ -47,7 +52,9 @@ export class MockDriver implements Driver {
       }
     }
     const text = step.text ?? '{"approve": true, "issues": []}';
-    const res = { ok: step.ok ?? true, text, costUsd: step.costUsd ?? 0, ...(step.tokens ? { tokens: step.tokens } : {}) };
+    const ok = step.ok ?? true;
+    // A scripted failure stands for the provider's own message, which is what braid judges.
+    const res = { ok, text, costUsd: step.costUsd ?? 0, ...(step.tokens ? { tokens: step.tokens } : {}), ...(ok ? {} : { error: step.error ?? text }) };
     opts.onEvent?.({ kind: 'result', ...res });
     return res;
   }

@@ -96,7 +96,9 @@ export class GeminiStreamParser {
   finish(exitCode: number, stderr: string): AgentResult {
     const ok = exitCode === 0 && this.status === 'success';
     const text = ok ? this.answer.trim() : [this.answer.trim(), this.errorText.trim(), stderr.trim().slice(-1500)].filter(Boolean).join('\n');
-    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: estimateCostUsd(this.usage, this.requestedModel ?? DRIVER_DEFAULT_MODEL.gemini), tokens: sumUsage(this.usage), costEstimated: true, sessionId: this.sessionId };
+    // What Gemini itself reported, apart from the agent's answer that opens `text`.
+    const error = ok ? undefined : [this.errorText.trim(), stderr.trim().slice(-1500)].filter(Boolean).join('\n') || undefined;
+    return { ok, text: text || `gemini exited ${exitCode} without a result`, costUsd: estimateCostUsd(this.usage, this.requestedModel ?? DRIVER_DEFAULT_MODEL.gemini), tokens: sumUsage(this.usage), costEstimated: true, sessionId: this.sessionId, ...(error ? { error } : {}) };
   }
 }
 

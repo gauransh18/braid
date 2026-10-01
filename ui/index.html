@@ -866,22 +866,30 @@ function runOutcome() {
     return { kind: 'done', icon: '&#10003;', label: 'done', bubble: `All ${plural(total, 'strand')} braided. Review ${branch} and merge it when you're happy.`,
       title: `All ${plural(total, 'strand')} are in the braid`, detail: `Review the work on <code>${esc(branch)}</code>, then merge it when you are happy with it.`, copy: `git merge ${branch}`, copyLabel: 'Copy merge command' };
   }
-  // Stopped by a limit: a task caught mid-retry is failed, the ones that never started are skipped.
-  const limited = (t) => /budget exhausted/i.test(t.error || '');
-  const byTokens = [...failed, ...skipped].some((t) => /token budget exhausted/i.test(t.error || ''));
-  if (byTokens && failed.every(limited)) {
-    const unfinished = failed.length + skipped.length;
-    return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the token limit. ${inBraid} of ${total} strands made it in.`,
-      title: 'Stopped: the token limit was reached', detail: `Every run has a safety limit on the tokens it may use (3 million per task unless the plan says otherwise), so a loop that keeps retrying cannot spend without end. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish. Resume gives the run a fresh allowance. To raise it, set <code>budgetTokens</code> in the plan (0 means no limit).` };
+  // Stopped by a limit or by an agent that ran out of usage: the tasks that never started are skipped, one caught
+  // mid-retry is failed, and their dependents are blocked. Whatever else failed on its own is mentioned, not hidden.
+  const limitHit = (t) => /budget exhausted/i.test(t.error || '');
+  const quotaHit = (t) => /agent unavailable: usage or credit limit reached/i.test(t.error || '');
+  const stopped = [...failed, ...skipped].filter((t) => limitHit(t) || quotaHit(t));
+  if (stopped.length) {
+    const alone = failed.filter((t) => !limitHit(t) && !quotaHit(t));
+    const unfinished = failed.length + skipped.length + blocked.length - alone.length;
+    const also = alone.length ? ` ${plural(alone.length, 'task')} also failed on their own; open them to see why.` : '';
+    if (stopped.some((t) => /token budget exhausted/i.test(t.error || ''))) {
+      return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the token limit. ${inBraid} of ${total} strands made it in.`,
+        title: 'Stopped: the token limit was reached', detail: `Every run has a safety limit on the tokens it may use (a pool of 3 million per task in the plan unless the plan says otherwise), so a loop that keeps retrying cannot spend without end. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume gives the run a fresh allowance. To raise it, set <code>budgetTokens</code> in the plan (0 means no limit).` };
+    }
+    if (stopped.some(quotaHit)) {
+      return { kind: 'limit', icon: '&#9208;', label: 'agent out of usage', bubble: `The agent is out of usage. ${inBraid} of ${total} strands made it in.`,
+        title: 'Stopped: the agent is out of usage or credit', detail: `${esc(first(stopped.find(quotaHit)))}<br>${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume carries on once the account has usage again.` };
+    }
+    return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the spending limit. ${inBraid} of ${total} strands made it in.`,
+      title: 'Stopped: a spending limit was reached', detail: `This run was started with a spending limit (older versions of the start screen asked for one). ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume carries on without a limit.` };
   }
   if (failed.length) {
     const why = failed.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>: ${esc(first(t))}`).join('<br>');
     return { kind: 'attention', icon: '&#9888;', label: 'needs attention', bubble: `${plural(failed.length, 'strand')} got tangled. ${inBraid} of ${total} made it in.`,
       title: `${plural(failed.length, 'strand')} got tangled`, detail: `${why}${failed.length > 2 ? `<br>and ${failed.length - 2} more.` : ''}${blocked.length ? `<br>${plural(blocked.length, 'task')} could not start because they depend on it.` : ''}<br>${inBraid} of ${total} strands are in the braid. Resume tries the tangled ones again.`, open: failed[0].id, openLabel: `See why: ${name(failed[0].id)}` };
-  }
-  if (skipped.some((t) => /budget exhausted/i.test(t.error || ''))) {
-    return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the spending limit. ${inBraid} of ${total} strands made it in.`,
-      title: 'Stopped: a spending limit was reached', detail: `This run was started with a spending limit (older versions of the start screen asked for one). ${inBraid} of ${total} strands are in the braid and ${plural(skipped.length, 'task')} never started. Resume carries on without a limit.` };
   }
   if (st.status === 'aborted' || skipped.some((t) => /aborted/i.test(t.error || ''))) {
     return { kind: 'stopped', icon: '&#9208;', label: 'stopped', bubble: `Run stopped. ${inBraid} of ${total} strands made it in and are safe.`,

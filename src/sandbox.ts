@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { spawnable } from './spawn.js';
+import { abortError, exec } from './proc.js';
 import type { SandboxSpec } from './types.js';
 
 /** A command line about to be spawned; a sandbox rewrites it to run inside a container. */
@@ -34,11 +33,12 @@ export class Sandbox {
   ) {}
 
   /** Find a working runtime and fail early, with a fix, if there is none. */
-  static async create(spec: SandboxSpec): Promise<Sandbox> {
+  static async create(spec: SandboxSpec, signal?: AbortSignal): Promise<Sandbox> {
     const candidates = process.env.BRAID_CONTAINER_RUNTIME ? [process.env.BRAID_CONTAINER_RUNTIME] : ['docker', 'podman'];
     const problems: string[] = [];
     for (const bin of candidates) {
-      const res = await probe(bin, ['info']);
+      const res = await probe(bin, ['info'], signal);
+      if (signal?.aborted) throw abortError();
       if (res.code === 0) return new Sandbox(spec, bin);
       problems.push(res.missing ? `${bin}: not installed` : `${bin}: not running (${res.stderr.trim().split('\n')[0] || `exit ${res.code}`})`);
     }
@@ -116,14 +116,12 @@ function containerName(): string {
   return `braid-${randomBytes(6).toString('hex')}`;
 }
 
-function probe(bin: string, args: string[]): Promise<{ code: number; stderr: string; missing: boolean }> {
-  return new Promise((resolve) => {
-    const run = spawnable(bin, args);
-    const child = spawn(run.cmd, run.args, { windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments });
-    let stderr = '';
-    child.stderr.on('data', (d) => (stderr += d));
-    child.on('error', () => resolve({ code: 1, stderr, missing: true }));
-    child.on('close', (code) => resolve({ code: code ?? 1, stderr, missing: false }));
-    setTimeout(() => child.kill(), 20_000).unref();
-  });
+/** Ask a container runtime whether it works. Stoppable, and its whole process tree dies on the time limit. */
+async function probe(bin: string, args: string[], signal?: AbortSignal): Promise<{ code: number; stderr: string; missing: boolean }> {
+  try {
+    const res = await exec(bin, args, { cwd: process.cwd(), allowFail: true, timeoutMs: 20_000, signal });
+    return { code: res.code, stderr: res.stderr, missing: false };
+  } catch {
+    return { code: 1, stderr: '', missing: true };
+  }
 }

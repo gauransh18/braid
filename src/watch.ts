@@ -8,6 +8,7 @@ import type { DriverRegistry } from './drivers/driver.js';
 import { checkTools } from './doctor.js';
 import { fetchRemotes, readBranches, readHistory } from './branches.js';
 import { detectVerify, HttpError, RunManager } from './runs.js';
+import { pidAlive } from './proc.js';
 import { RunStore, stateRoot } from './store.js';
 import type { RunState } from './types.js';
 
@@ -20,6 +21,8 @@ const POLL_MS = 400;
 export interface WatchServer {
   url: string;
   close(): Promise<void>;
+  /** Stop the run this server is driving (if any) and wait up to `ms` for it to save its state. */
+  stopActiveRun(ms: number): Promise<void>;
 }
 
 /** Turns on the write endpoints: start, stop and resume runs, draft plans. Off unless a token is given. */
@@ -51,6 +54,7 @@ export async function startWatch(repo: string, port = 4777, control?: ControlOpt
   return {
     url: `http://127.0.0.1:${actual}/`,
     close: () => new Promise((r) => server.close(() => r())),
+    stopActiveRun: (ms) => (runs ? runs.stopAndWait(ms) : Promise.resolve()),
   };
 }
 
@@ -217,7 +221,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
     const ids = (await RunStore.listRuns(repo)).filter((id) => RUN_ID_RE.test(id));
     const runs = await Promise.all(
       ids.map(async (id) => {
-        const s = await RunStore.loadState(repo, id).catch(() => null);
+        const s = revive(await RunStore.loadState(repo, id).catch(() => null));
         return { runId: id, status: s?.status ?? 'starting', tokens: s?.tokens, createdAt: s?.createdAt };
       }),
     );
@@ -237,7 +241,7 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
 
   if (parts.length === 3) {
     const [plan, state] = await Promise.all([readJson(join(runDir, 'plan.json')), readJson(join(runDir, 'state.json'))]);
-    return send(res, 200, { plan, state });
+    return send(res, 200, { plan, state: revive(state as RunState | null) });
   }
   if (parts[3] === 'events' && parts.length === 4) return streamRun(runDir, req, res);
   if (parts[3] === 'branches' && parts.length === 4) {
@@ -251,6 +255,24 @@ async function handle(repo: string, req: IncomingMessage, res: ServerResponse, c
     return send(res, 200, await taskLogs(join(runDir, 'tasks', taskId)));
   }
   send(res, 404, { error: 'not found' });
+}
+
+/**
+ * A run whose process is gone (force-quit, a crash, the app killed) still says "running" in state.json. Show it as
+ * stopped, so the dashboard offers Resume instead of waiting for a run that will never move again.
+ */
+function revive<T extends { status?: string; pid?: number } | null>(state: T): T {
+  if (state && state.status === 'running' && state.pid && !pidAlive(state.pid)) return { ...state, status: 'aborted' };
+  return state;
+}
+
+function stateForDashboard(text: string): string {
+  try {
+    const state = JSON.parse(text) as RunState;
+    return JSON.stringify(revive(state));
+  } catch {
+    return text.replace(/\n\s*/g, '');
+  }
 }
 
 async function readJson(path: string): Promise<unknown> {
@@ -318,7 +340,7 @@ async function streamRun(runDir: string, req: IncomingMessage, res: ServerRespon
     if (ss && ss.mtimeMs !== stateMtime) {
       stateMtime = ss.mtimeMs;
       const text = await readFile(statePath, 'utf8').catch(() => '');
-      if (text) write('state', text.replace(/\n\s*/g, ''));
+      if (text) write('state', stateForDashboard(text));
     }
   };
 

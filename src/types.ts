@@ -154,4 +154,11 @@ export interface AgentResult {
   /** `costUsd` was computed from tokens and list prices, not reported by the CLI. */
   costEstimated?: boolean;
   sessionId?: string;
+  /**
+   * On failure, what the provider or the CLI itself said (an API error, a usage-limit notice), never the agent's own
+   * words. This is the only text braid judges as "the provider turned the call away"; `text` can hold agent prose.
+   */
+  error?: string;
+  /** Set by the orchestrator when it stopped the call for running past its time limit. */
+  timedOut?: boolean;
 }

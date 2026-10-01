@@ -4,7 +4,7 @@ import type { DriverRegistry, DriverRunOptions } from './drivers/driver.js';
 import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
 import { applyReplan, DEFAULT_TOKENS_PER_TASK, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
-import { SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
+import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
 import { readFile } from 'node:fs/promises';
 import { conflictPrompt, extractJson, replanPrompt, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
@@ -28,6 +28,9 @@ export interface OrchestratorOptions {
   retryDelaysMs?: number[];
 }
 
+/** The longest delay a timer takes: above it Node fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /** After a rate limit or an outage: wait, try again, wait longer. About five minutes in all before giving up. */
 const RETRY_DELAYS_MS = [20_000, 40_000, 80_000, 160_000];
 
@@ -49,10 +52,12 @@ export class Orchestrator {
   private integrationDir!: string;
   private sandbox?: Sandbox;
   private resumeEvent?: Record<string, unknown>;
-  /** Why no new task may start any more (the agent provider is out of quota). The run carries on with what is running. */
-  private halted?: string;
+  /** Agents that are out of usage or credit, with the message. Tasks that need one do not start; the others carry on. */
+  private halted = new Map<string, string>();
   /** Fresh and output tokens the run had used before this process took it over; a resumed run gets a fresh allowance. */
   private tokenBaseline = 0;
+  /** Tasks this process has to run: the default token limit is sized from it, and replanned tasks do not enlarge it. */
+  private tasksToRun = 0;
   private mergeChain: Promise<unknown> = Promise.resolve();
   private saveChain: Promise<void> = Promise.resolve();
   private saveQueued = false;
@@ -82,13 +87,24 @@ export class Orchestrator {
     return `braid/${this.runId}/${name}`;
   }
 
-  /** Serialized, coalesced snapshot writes: concurrent callers share the next write. */
+  /** Serialized, coalesced snapshot writes: concurrent callers share the next write. Never rejects. */
   private save(): Promise<void> {
     if (this.saveQueued) return this.saveChain;
     this.saveQueued = true;
-    this.saveChain = this.saveChain.then(async () => {
+    // A failed write must not poison the chain: every later snapshot would reject without even trying.
+    this.saveChain = this.saveChain.catch(() => undefined).then(async () => {
       this.saveQueued = false;
-      await this.store.saveState(this.state);
+      try {
+        await this.store.saveState(this.state);
+      } catch (err) {
+        // The snapshot is a view of the run, not the run: a failed write (disk full, a locked file) must not take
+        // down tasks that are mid-flight. The next write carries the same state.
+        try {
+          this.store.event('state_save_failed', { message: String(err).slice(0, 300) });
+        } catch {
+          /* the log is as unwritable as the snapshot */
+        }
+      }
     });
     return this.saveChain;
   }
@@ -104,7 +120,7 @@ export class Orchestrator {
     await this.git.excludeStateDir();
     if (plan.sandbox) {
       // Fail before creating any worktree if there is no working container runtime.
-      this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox));
+      this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox, this.opts.signal));
     }
     this.integrationDir = this.worktreeDir('_integration');
     if (this.opts.resume) {
@@ -131,7 +147,8 @@ export class Orchestrator {
       this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
     }
     this.state.pid = process.pid;
-    await this.runSetup(this.integrationDir);
+    this.tasksToRun = Object.values(this.state.tasks).filter((t) => !COMPLETE.includes(t.status)).length;
+    const setup = await this.runSetup(this.integrationDir);
     // Persist before announcing: anyone who reacts to run_start by reading state.json must see this run, not a stale one.
     await this.save();
     if (this.resumeEvent) this.store.event('run_resume', this.resumeEvent);
@@ -141,13 +158,21 @@ export class Orchestrator {
     }
 
     try {
-      await this.schedule();
+      if (!setup.ok && !this.opts.signal?.aborted) {
+        // Every post-merge check runs in this tree: with it half-prepared each task would be blamed for the setup.
+        const error = `setup failed in the integration worktree, so nothing was started. ${setup.output}`.slice(0, 4000);
+        this.store.event('run_error', { message: error });
+        for (const t of Object.values(this.state.tasks)) if (t.status === 'pending') this.setStatus(t, 'skipped', { error });
+      } else {
+        await this.schedule();
+      }
     } finally {
       await this.git.removeWorktree(this.integrationDir);
     }
 
     const all = Object.values(this.state.tasks);
-    this.state.status = this.opts.signal?.aborted ? 'aborted' : all.every((t) => COMPLETE.includes(t.status)) ? 'done' : 'failed';
+    // A Stop that lands after the last task merged still leaves a finished run.
+    this.state.status = all.every((t) => COMPLETE.includes(t.status)) ? 'done' : this.opts.signal?.aborted ? 'aborted' : 'failed';
     this.state.endedAt = new Date().toISOString();
     this.store.event('run_end', { status: this.state.status, costUsd: this.state.costUsd, tokens: this.state.tokens, costEstimated: this.state.costEstimated });
     await this.save();
@@ -193,7 +218,7 @@ export class Orchestrator {
   private limitReached(): string | undefined {
     if (this.plan.budgetUsd !== undefined && this.state.costUsd >= this.plan.budgetUsd) return 'budget exhausted';
     // A run that sets no limit still gets one, so a loop that keeps retrying cannot spend without end.
-    const cap = this.plan.budgetTokens ?? DEFAULT_TOKENS_PER_TASK * this.tasks.size;
+    const cap = this.plan.budgetTokens ?? DEFAULT_TOKENS_PER_TASK * this.tasksToRun;
     const used = this.state.tokens ? this.state.tokens.input + this.state.tokens.output - this.tokenBaseline : 0;
     if (cap > 0 && used >= cap) {
       return `token budget exhausted (${formatTokens(used)} fresh and output tokens used; the limit is ${formatTokens(cap)}). Raise budgetTokens in the plan, or set it to 0 for no limit`;
@@ -201,10 +226,21 @@ export class Orchestrator {
     return undefined;
   }
 
-  /** Why nothing new should start, or undefined to carry on. */
-  private stopReason(): string | undefined {
+  /** Why nothing new should start (for a task on `driver`, when given), or undefined to carry on. */
+  private stopReason(driver?: string): string | undefined {
     if (this.opts.signal?.aborted) return 'run aborted';
-    return this.halted ?? this.limitReached();
+    return this.limitReached() ?? (driver ? this.halted.get(driver) : undefined);
+  }
+
+  /** Throws the abort the run was given, so every phase ends through the same path in runTask. */
+  private checkpoint(): void {
+    if (this.opts.signal?.aborted) throw abortError();
+  }
+
+  /** End a task that must not go on because a limit was hit or an agent ran out of quota between two steps. */
+  private halt(s: TaskState, stop: string): void {
+    if (this.opts.signal?.aborted) this.setStatus(s, 'skipped', { error: 'run aborted' });
+    else this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: stop });
   }
 
   private async schedule(): Promise<void> {
@@ -213,20 +249,31 @@ export class Orchestrator {
 
     for (;;) {
       const states = this.state.tasks;
-      const stop = this.stopReason();
+
+      // Stops and failures first, until nothing changes: a dependent can be listed before the task it waits for, and a
+      // task already started (still in setup, so still "pending") is not ours to skip.
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const [id, task] of this.tasks) {
+          const s = states[id]!;
+          if (s.status !== 'pending' || running.has(id)) continue;
+          const stop = this.stopReason(task.driver);
+          if (stop) {
+            this.setStatus(s, 'skipped', { error: stop });
+            changed = true;
+            continue;
+          }
+          const bad = task.deps.find((d) => ['failed', 'blocked', 'skipped'].includes(states[d]!.status));
+          if (bad) {
+            this.setStatus(s, 'blocked', { error: `dependency "${bad}" did not complete` });
+            changed = true;
+          }
+        }
+      }
 
       for (const [id, task] of this.tasks) {
         const s = states[id]!;
-        if (s.status !== 'pending') continue;
-        if (stop) {
-          this.setStatus(s, 'skipped', { error: stop });
-          continue;
-        }
-        const bad = task.deps.find((d) => ['failed', 'blocked', 'skipped'].includes(states[d]!.status));
-        if (bad) {
-          this.setStatus(s, 'blocked', { error: `dependency "${bad}" did not complete` });
-          continue;
-        }
+        if (s.status !== 'pending' || running.has(id)) continue;
         const ready = task.deps.every((d) => states[d]!.status === 'done');
         if (ready && running.size < concurrency) {
           running.set(id, this.runTask(task).finally(() => running.delete(id)));
@@ -259,8 +306,8 @@ export class Orchestrator {
   private async verify(task: ResolvedTask, cwd: string): Promise<{ ok: boolean; report: string }> {
     for (const cmd of task.verify) {
       const res = await this.sh(cmd, cwd, 'verify');
-      // Cut short by an abort: not a verdict on the work, so it does not belong in the log of checks.
-      if (res.aborted) return { ok: false, report: 'verification stopped because the run was aborted' };
+      // Cut short by an abort: not a verdict on the work, so it is neither logged as a check nor fed back.
+      if (res.aborted) throw abortError();
       this.store.event('verify', { task: task.id, cmd, code: res.code, dir: cwd === this.integrationDir ? 'integration' : 'task' });
       if (res.code !== 0) return { ok: false, report: `\`${cmd}\` ${describeExit(res)}:\n${tail(res.stdout + res.stderr)}` };
     }
@@ -281,8 +328,8 @@ export class Orchestrator {
 
     try {
       while (s.attempts < task.maxAttempts) {
-        const stop = this.stopReason();
-        if (stop) return this.setStatus(s, this.opts.signal?.aborted ? 'skipped' : 'failed', { error: stop });
+        const stop = this.stopReason(task.driver);
+        if (stop) return this.halt(s, stop);
         s.attempts++;
         const attempt = s.attempts;
 
@@ -297,6 +344,12 @@ export class Orchestrator {
           fresh = false;
         }
         s.branch = branch;
+        // Setup can take minutes, long enough for a Stop, a limit or an agent's quota to have arrived meanwhile.
+        const stopAfterSetup = this.stopReason(task.driver);
+        if (stopAfterSetup) {
+          s.attempts--;
+          return this.halt(s, stopAfterSetup);
+        }
 
         const resolving = conflicts.length > 0;
         this.setStatus(s, resolving ? 'resolving' : 'running', { error: undefined });
@@ -333,6 +386,7 @@ export class Orchestrator {
           continue;
         }
 
+        this.checkpoint();
         this.setStatus(s, 'verifying');
         const v = await this.verify(task, dir);
         if (!v.ok) {
@@ -341,6 +395,7 @@ export class Orchestrator {
         }
 
         if (task.review) {
+          this.checkpoint();
           this.setStatus(s, 'reviewing');
           const verdict = await this.review(task, dir, forkPoint, attempt);
           if (!verdict.approve) {
@@ -349,6 +404,7 @@ export class Orchestrator {
           }
         }
 
+        this.checkpoint();
         this.setStatus(s, 'merging');
         const merged = await this.serialMerge(task, branch);
         if (!merged.ok) {
@@ -367,7 +423,7 @@ export class Orchestrator {
       }
       const error = feedback.at(-1)?.reason.slice(0, 4000) ?? 'no attempts made';
       // Not "failed" yet: that would block the dependents before the planner has had its say.
-      if (this.canReplan()) {
+      if (this.canReplan(task)) {
         this.setStatus(s, 'replanning', { error });
         if (await this.replan(task, dir, feedback)) return;
       }
@@ -377,10 +433,14 @@ export class Orchestrator {
         // Stopping the agent mid-call throws; that is the person's Stop, not a failure of the task.
         this.setStatus(s, 'skipped', { error: 'run aborted' });
       } else if (err instanceof AgentUnavailableError) {
-        // Not the work's fault, so it does not count as a try.
-        s.attempts = Math.max(0, s.attempts - 1);
-        if (err.kind === 'quota') this.halted ??= err.message;
-        this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: err.message });
+        // Not the work's fault, so a worker or resolver call that never got an answer does not count as a try. The
+        // reviewer and the planner only run after the work itself used its attempts.
+        if (err.role === 'worker' || err.role === 'resolver') s.attempts = Math.max(0, s.attempts - 1);
+        if (err.kind === 'quota' && !this.halted.has(task.driver)) this.halted.set(task.driver, err.message);
+        // Say what the task itself failed on when only the planner could not be reached.
+        const earlier = err.role === 'replanner' ? feedback.at(-1)?.reason.slice(0, 3000) : undefined;
+        const error = earlier ? `${earlier}\n\nThe planner could not be reached to replace this task: ${err.message}` : err.message;
+        this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error });
       } else {
         this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: String(err) });
       }
@@ -393,8 +453,8 @@ export class Orchestrator {
    * A task failed for good: ask the planner to split or rewrite it so its dependents can still run.
    * True when the task became `replaced` and the graph gained the new tasks; false leaves the caller to fail it.
    */
-  private canReplan(): boolean {
-    return (this.state.replans ?? 0) < (this.plan.maxReplans ?? 0) && !this.stopReason();
+  private canReplan(task: ResolvedTask): boolean {
+    return (this.state.replans ?? 0) < (this.plan.maxReplans ?? 0) && !this.stopReason(task.driver);
   }
 
   private async replan(task: ResolvedTask, dir: string, feedback: Feedback[]): Promise<boolean> {
@@ -442,8 +502,11 @@ export class Orchestrator {
       this.setStatus(s, 'replaced', { replacedBy: ids, endedAt: new Date().toISOString() });
       return true;
     } catch (err) {
-      // The provider is down: say so on the task rather than blaming the plan.
-      if (err instanceof AgentUnavailableError || this.opts.signal?.aborted) throw err;
+      // The provider is down, or the run was stopped: no replan happened, so it is not spent, and runTask says why.
+      if (err instanceof AgentUnavailableError || this.opts.signal?.aborted) {
+        this.state.replans = used;
+        throw err;
+      }
       return fail(err instanceof Error ? err.message : String(err));
     }
   }
@@ -452,7 +515,9 @@ export class Orchestrator {
    * One agent call, with the two safety nets around it. It is stopped after `timeoutMin` (the attempt then fails like
    * any other and is retried), and when the provider turns it away (rate limit, overload, network) it is retried
    * after a pause instead of being counted against the task. Throws AgentUnavailableError when that keeps happening,
-   * or at once when the account is out of usage or credit. Spend of every call, retried or not, is recorded.
+   * when a limit is reached meanwhile, or at once when the account is out of usage or credit, and an AbortError when
+   * the run is stopped. Spend is recorded for every call that reports it; a call killed before its agent reported
+   * anything (a timeout, a Stop) adds nothing.
    */
   private async callAgent(task: ResolvedTask, role: string, opts: Omit<DriverRunOptions, 'signal'>): Promise<AgentResult> {
     const driver = this.opts.drivers.get(task.driver);
@@ -461,7 +526,8 @@ export class Orchestrator {
     const userAbort = () => this.opts.signal?.aborted === true;
 
     for (let retry = 0; ; retry++) {
-      const limit = task.timeoutMin > 0 ? AbortSignal.timeout(task.timeoutMin * 60_000) : undefined;
+      // Timers above 2^31 - 1 ms fire at once, so a huge limit has to be capped rather than passed on.
+      const limit = task.timeoutMin > 0 ? AbortSignal.timeout(Math.min(task.timeoutMin * 60_000, MAX_TIMER_MS)) : undefined;
       const signals = [this.opts.signal, limit].filter((x): x is AbortSignal => !!x);
       let res: AgentResult;
       try {
@@ -471,21 +537,25 @@ export class Orchestrator {
         res = { ok: false, text: '', costUsd: 0 };
       }
       this.addUsage(s, res);
-      if (res.ok || userAbort()) return res;
+      // A Stop is not an outcome of the call: whatever the driver made of it, every phase ends the same way.
+      if (userAbort()) throw abortError();
+      if (res.ok) return res;
 
       if (limit?.aborted) {
-        const text = `The agent was stopped after ${task.timeoutMin} minutes without finishing. Its partial work is still in the worktree.`;
+        const partial = role === 'worker' || role === 'resolver' ? ' Its partial work is still in the worktree.' : '';
+        const text = `The agent was stopped after ${task.timeoutMin} minutes without finishing.${partial}`;
         this.store.event('agent_timeout', { task: task.id, role, minutes: task.timeoutMin });
-        return { ...res, text };
+        return { ...res, text, error: undefined, timedOut: true };
       }
 
-      const kind = classifyAgentFailure(res.text);
+      // Only what the provider or the CLI said is judged, never the agent's own words.
+      const kind = res.error ? classifyAgentFailure(res.error) : null;
       if (!kind) return res;
-      if (kind === 'quota' || retry >= delays.length) throw new AgentUnavailableError(kind, res.text, retry);
+      if (kind === 'quota' || retry >= delays.length || this.stopReason(task.driver)) throw new AgentUnavailableError(kind, res.error!, retry, role);
       const delayMs = Math.round(delays[retry]! * (1 + Math.random() * 0.25));
-      this.store.event('agent_retry', { task: task.id, role, retry: retry + 1, of: delays.length, delayMs, reason: res.text.trim().split('\n')[0]!.slice(0, 200) });
+      this.store.event('agent_retry', { task: task.id, role, retry: retry + 1, of: delays.length, delayMs, reason: res.error!.trim().split('\n')[0]!.slice(0, 200) });
       await sleep(delayMs, undefined, { signal: this.opts.signal }).catch(() => undefined);
-      if (userAbort()) return res;
+      this.checkpoint();
     }
   }
 
@@ -511,6 +581,8 @@ export class Orchestrator {
       wrap: this.sandbox?.agentWrap(dir),
       onEvent: this.store.agentLog(task.id, attempt, 'reviewer'),
     });
+    // Not a verdict, so not a reason to send the worker back: the review itself did not fit in the time.
+    if (res.timedOut) throw new Error(`The reviewer was stopped after ${task.timeoutMin} minutes without a verdict. Raise timeoutMin in the plan or on the task if reviews of this size need longer.`);
     const verdict = extractJson<{ approve?: boolean; issues?: string[] }>(res.text);
     const out = {
       approve: res.ok && verdict?.approve === true,
@@ -533,7 +605,16 @@ export class Orchestrator {
       if (!m.ok) {
         return { ok: false, reason: `Your change conflicted with work other tasks merged first.\n${tail(m.detail, 1500)}` };
       }
-      const v = await this.verify(task, this.integrationDir);
+      let v: { ok: boolean; report: string };
+      try {
+        v = await this.verify(task, this.integrationDir);
+      } catch (err) {
+        // A Stop cut the combined check short. The integration branch only holds verified states, so the merge goes,
+        // but this is not a failed check: nothing is logged as one and nothing is fed back to the agent.
+        await this.git.resetHard(this.integrationDir, before);
+        this.store.event('merge_aborted', { task: task.id });
+        throw err;
+      }
       if (!v.ok) {
         await this.git.resetHard(this.integrationDir, before);
         this.store.event('merge_reverted', { task: task.id });
@@ -559,15 +640,6 @@ export class Orchestrator {
     });
     this.mergeChain = job.catch(() => undefined);
     return job;
-  }
-}
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

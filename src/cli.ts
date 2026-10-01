@@ -156,17 +156,46 @@ Put the file in a folder on your PATH (and rename it braid.exe) to run it as jus
  * force-quits, so a call that will not die cannot trap the terminal.
  */
 function exitOnSignals(graceful?: () => void): void {
-  let asked = false;
+  let firstAt = 0;
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
-      if (graceful && !asked) {
-        asked = true;
+      if (graceful && !firstAt) {
+        firstAt = Date.now();
         graceful();
         return;
       }
+      // npm and some shells deliver one Ctrl-C twice within a moment; only a later press is a second one.
+      if (graceful && Date.now() - firstAt < 1000) return;
       if (graceful) console.log('\nforce quit: killing everything still running');
       killAllChildren();
       process.exit(128 + (osConstants.signals[sig] ?? 2));
+    });
+  }
+  // The terminal is gone (window closed, ssh dropped). Children no longer share its process group, so nothing else
+  // stops them. There is nobody to read output, and writing to a dead terminal can block, so go quiet first.
+  process.on('SIGHUP', () => {
+    process.stdout.write = () => true;
+    process.stderr.write = () => true;
+    if (graceful && !firstAt) {
+      firstAt = Date.now();
+      graceful();
+      // Give the run a moment to save its state, but do not let it hold the process open.
+      setTimeout(() => {
+        killAllChildren();
+        process.exit(129);
+      }, 10_000).unref();
+      return;
+    }
+    killAllChildren();
+    process.exit(129);
+  });
+}
+
+/** Output that nobody reads any more (`braid run | head`, a closed pipe) is not a reason to crash mid-run. */
+function ignoreClosedOutput(): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE' && err.code !== 'EIO' && err.code !== 'ERR_STREAM_DESTROYED') throw err;
     });
   }
 }
@@ -212,7 +241,9 @@ async function main(argv: string[]): Promise<number> {
     return values.help ? 0 : 1;
   }
   const port = values.port ? Number(values.port) : undefined;
-  if (cmd !== 'run' && cmd !== 'resume') exitOnSignals();
+  ignoreClosedOutput();
+  // `run`, `resume` and `watch` wind down gracefully on the first signal; they install their own handlers below.
+  if (cmd !== 'run' && cmd !== 'resume' && cmd !== 'watch') exitOnSignals();
 
   if (cmd === 'demo') {
     const orch = await createDemoRun();
@@ -248,6 +279,13 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     // The token stays out of argv (visible in `ps`): it comes from the environment or is generated here.
     const token = values.control ? process.env.BRAID_CONTROL_TOKEN || randomBytes(24).toString('hex') : undefined;
     const watch = await startWatch(repo, port, token ? { token, drivers: registry } : undefined);
+    // A run started from the dashboard lives in this process: stop it properly (state saved, resumable) before leaving.
+    exitOnSignals(() => {
+      void watch.stopActiveRun(15_000).finally(() => {
+        killAllChildren();
+        process.exit(0);
+      });
+    });
     console.log(`braid watch: ${watch.url}${token && !process.env.BRAID_CONTROL_TOKEN ? `#token=${token}` : ''}  (Ctrl-C to exit)`);
     if (token) console.log('controls enabled: open the URL above (the token is in the part after #)');
     await new Promise(() => undefined);

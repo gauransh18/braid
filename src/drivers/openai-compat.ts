@@ -1,8 +1,7 @@
-import { spawn } from 'node:child_process';
 import { mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DRIVER_DEFAULT_MODEL, estimateCostUsd, sumUsage, type Usage } from '../pricing.js';
-import type { CommandSpec } from '../sandbox.js';
+import { shell } from '../proc.js';
 import type { AgentEvent, AgentResult } from '../types.js';
 import type { Driver, DriverRunOptions } from './driver.js';
 
@@ -43,9 +42,9 @@ export class OpenAICompatDriver implements Driver {
   async run(opts: DriverRunOptions): Promise<AgentResult> {
     const label = this.cfg.label ?? this.cfg.name;
     const emit = (e: AgentEvent) => opts.onEvent?.(e);
-    const finish = (ok: boolean, text: string, usage: Usage[] = [], model?: string): AgentResult => {
+    const finish = (ok: boolean, text: string, usage: Usage[] = [], model?: string, fromProvider = false): AgentResult => {
       const costUsd = estimateCostUsd(usage, model);
-      const res: AgentResult = { ok, text, costUsd, tokens: sumUsage(usage), costEstimated: true };
+      const res: AgentResult = { ok, text, costUsd, tokens: sumUsage(usage), costEstimated: true, ...(fromProvider && !ok ? { error: text } : {}) };
       emit({ kind: 'result', ...res });
       return res;
     };
@@ -69,7 +68,7 @@ export class OpenAICompatDriver implements Driver {
       try {
         reply = await this.chat(key, { model, messages, tools: tools.length ? tools : undefined, tool_choice: tools.length ? 'auto' : undefined, temperature: 0.2 }, opts.signal);
       } catch (err) {
-        return finish(false, (err as Error).message, usage, model);
+        return finish(false, (err as Error).message, usage, model, true);
       }
       const u = reply.usage;
       if (u) {
@@ -338,32 +337,15 @@ export function commandAllowed(command: string, allowedTools: string[]): boolean
   });
 }
 
-function runCommand(command: string, cwd: string, opts: DriverRunOptions): Promise<{ ok: boolean; text: string }> {
-  // Inside a container when the plan sandboxes the agent; otherwise on the host in the worktree.
-  const spec: CommandSpec = opts.wrap ? opts.wrap({ cmd: 'sh', args: ['-c', command] }) : { cmd: command, args: [] };
-  return new Promise((done) => {
-    const child = opts.wrap ? spawn(spec.cmd, spec.args, { cwd, windowsHide: true }) : spawn(command, { cwd, shell: true, windowsHide: true });
-    let out = '';
-    const add = (d: Buffer) => {
-      out += d;
-      if (out.length > 60_000) out = out.slice(-30_000);
-    };
-    child.stdout?.on('data', add);
-    child.stderr?.on('data', add);
-    const timer = setTimeout(() => child.kill(), 120_000);
-    const stop = () => child.kill();
-    opts.signal?.addEventListener('abort', stop, { once: true });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      done({ ok: false, text: String(err) });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      opts.signal?.removeEventListener('abort', stop);
-      const tail = out.length > 8000 ? `...${out.slice(-8000)}` : out;
-      done({ ok: code === 0, text: `exit code ${code ?? 1}\n${tail}` });
-    });
-  });
+async function runCommand(command: string, cwd: string, opts: DriverRunOptions): Promise<{ ok: boolean; text: string }> {
+  // Inside a container when the plan sandboxes the agent; otherwise on the host in the worktree. Through the same
+  // helper as setup and verify, so Stop, the time limit and quitting braid reach everything the command started.
+  const spec = opts.wrap ? opts.wrap({ cmd: 'sh', args: ['-c', command] }) : undefined;
+  const res = await shell(command, cwd, 120_000, spec, opts.signal);
+  const out = res.stdout + res.stderr;
+  const tail = out.length > 8000 ? `...${out.slice(-8000)}` : out;
+  if (res.timedOut) return { ok: false, text: `The command was stopped after 120 seconds.\n${tail}` };
+  return { ok: res.code === 0, text: `exit code ${res.code}\n${tail}` };
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

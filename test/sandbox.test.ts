@@ -99,6 +99,11 @@ describe('sandbox command lines', () => {
     assert.equal(wrapped.args[wrapped.args.indexOf('BRAID_TEST_SECRET') - 1], '-e');
     assert.ok(!wrapped.args.join(' ').includes('hunter2'), 'the secret value never appears in argv');
     assert.deepEqual(wrapped.args.slice(-6), ['--entrypoint', 'claude', 'node:22', '-p', '--model', 'm']);
+    // A name to remove the container by when the run is stopped, since killing the docker client does not stop it.
+    assert.ok(wrapped.container, 'the wrapped agent names its container');
+    assert.equal(wrapped.args[wrapped.args.indexOf('--name') + 1], wrapped.container.name);
+    assert.match(wrapped.container.name, /^braid-[0-9a-f]{12}$/);
+    assert.notEqual(sb({ agent: true }).agentWrap('/x')!({ cmd: 'claude', args: [] }).container!.name, wrapped.container.name, 'a fresh name for every call');
     delete process.env.BRAID_TEST_SECRET;
   });
 

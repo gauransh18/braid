@@ -8,8 +8,23 @@ const FALLBACK_IDENTITY = ['-c', 'user.name=braid', '-c', 'user.email=braid@loca
 export class Git {
   constructor(readonly repo: string) {}
 
+  /**
+   * Worktrees this object created, with the git directory recorded at creation. A task's worktree is mounted into a
+   * sandbox container that can rewrite its `.git` pointer file, and git trusts that file to find the repository (and
+   * its config, which can name a program to run). Host-side git therefore never discovers the repository from a
+   * worktree: it is told where it is.
+   */
+  private pinned = new Map<string, string>();
+
   async run(args: string[], cwd = this.repo, allowFail = false) {
-    return exec('git', args, { cwd, allowFail });
+    const gitDir = this.pinned.get(resolve(cwd));
+    const pin = gitDir ? ['--git-dir', gitDir, '--work-tree', resolve(cwd), '-c', 'core.fsmonitor=false'] : [];
+    return exec('git', [...pin, ...args], { cwd, allowFail });
+  }
+
+  private async pin(path: string): Promise<void> {
+    const { stdout } = await exec('git', ['rev-parse', '--absolute-git-dir'], { cwd: path });
+    this.pinned.set(resolve(path), stdout.trim());
   }
 
   static async toplevel(dir: string): Promise<string> {
@@ -38,12 +53,14 @@ export class Git {
 
   async addWorktree(path: string, newBranch: string, from: string): Promise<void> {
     await this.run(['worktree', 'add', '-b', newBranch, path, from]);
+    await this.pin(path);
   }
 
   /** Check out an existing branch into a new worktree. */
   async attachWorktree(path: string, branch: string): Promise<void> {
     await this.run(['worktree', 'prune']);
     await this.run(['worktree', 'add', path, branch]);
+    await this.pin(path);
   }
 
   async branchExists(branch: string): Promise<boolean> {
@@ -55,8 +72,15 @@ export class Git {
     await this.run(['clean', '-fdq'], cwd);
   }
 
+  /**
+   * Remove a worktree, whatever state it is in. A git killed in the middle of `worktree add` leaves the new worktree
+   * locked ("initializing"), which a plain `remove --force` refuses and `prune` skips, so it is unlocked first.
+   */
   async removeWorktree(path: string): Promise<void> {
-    await this.run(['worktree', 'remove', '--force', path], this.repo, true);
+    await this.run(['worktree', 'unlock', path], this.repo, true);
+    await this.run(['worktree', 'remove', '--force', '--force', path], this.repo, true);
+    await this.run(['worktree', 'prune'], this.repo, true);
+    this.pinned.delete(resolve(path));
   }
 
   async deleteBranch(branch: string): Promise<void> {

@@ -173,6 +173,16 @@ describe('control endpoints', () => {
     assert.equal((await authed(server, 'POST', `/api/run/${first.json.runId}/stop`, {})).status, 409, 'nothing left to stop');
   });
 
+  it('stops the run it is driving and waits for it to save its state (what quitting does)', async () => {
+    script = () => ({ files: { 'a.txt': 'a\n' }, delayMs: 4000 });
+    const started = await authed(server, 'POST', '/api/runs', { plan: plan() });
+    assert.equal(started.status, 202);
+    await server.stopActiveRun(10_000);
+    assert.equal((await authed(server, 'GET', '/api/status')).json.active, null);
+    assert.equal((await finished(started.json.runId)).status, 'aborted');
+    await server.stopActiveRun(10_000); // nothing active: returns at once
+  });
+
   it('resumes a failed run with a new budget', async () => {
     script = () => ({ files: { 'a.txt': 'bad\n' } });
     writeFileSync(join(repo, 'check.js'), "const fs=require('fs');process.exit(fs.existsSync('a.txt')&&fs.readFileSync('a.txt','utf8').includes('bad')?1:0);\n");

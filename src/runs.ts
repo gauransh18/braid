@@ -242,6 +242,15 @@ export class RunManager {
     return this.start(plan, runId);
   }
 
+  /** Stop the active run, if any, and wait up to `ms` for it to wind down and save its state (used when quitting). */
+  async stopAndWait(ms: number): Promise<void> {
+    const active = this.active;
+    if (!active) return;
+    active.ac.abort();
+    const end = Date.now() + ms;
+    while (this.active === active && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  }
+
   stop(runId: string): void {
     if (this.active?.runId !== runId) throw new HttpError(409, 'that run is not active');
     this.active.ac.abort();

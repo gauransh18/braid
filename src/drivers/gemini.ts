@@ -137,10 +137,14 @@ export class GeminiStreamParser {
    * count as fresh input, the answer text and tool call arguments as output. Each turn re-sends the whole
    * conversation, mostly from cache, so only the new content is counted once. The real figure is higher: reasoning
    * tokens and the CLI's own system prompt and tool definitions never stream. Good enough for the token limit to see
-   * most of what a killed call cost.
+   * most of what a killed call cost. Only for a call that ended without a successful result: one that succeeded and
+   * reported nothing is left at zero.
    */
   private usageSoFar(): Usage[] {
-    if (this.reported) return this.usage;
+    // A call that finished successfully and carried no figures is not "a call that was cut off": the CLI stopped
+    // reporting usage (a renamed field, say). That has to stay visible as zero tokens, as the weekly canary looks
+    // for exactly that, and not be covered by a number that only resembles the real one.
+    if (this.reported || this.status === 'success') return this.usage;
     return [{ model: this.model ?? this.requestedModel, input: Math.ceil(this.charsIn / CHARS_PER_TOKEN), cached: 0, output: Math.ceil(this.charsOut / CHARS_PER_TOKEN) }];
   }
 }

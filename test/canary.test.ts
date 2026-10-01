@@ -72,6 +72,14 @@ describe('the canary script', { skip }, () => {
     assert.match(b.out, /^ok   gemini/m);
   });
 
+  it('fails gemini when its result stops carrying the usage figures, which an estimate must not hide', async () => {
+    const r = await canary(['--fake', '--drivers', 'gemini'], { CANARY_FAKE_DRIFT: 'gemini:usage' });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^FAIL gemini/m);
+    assert.match(r.out, /task alpha reported no tokens/);
+    assert.match(r.out, /0 passed, 1 failed, 0 skipped/);
+  });
+
   it('skips a driver that is not installed and says why; --strict makes that a failure', async () => {
     const lax = await canary([], NO_AGENTS);
     assert.equal(lax.code, 0, lax.out);

@@ -67,6 +67,19 @@ describe('gemini token usage when the CLI never reported any', () => {
     assert.deepEqual(p.aborted().tokens, { input: 200, cached: 100, output: 50 });
   });
 
+  it('estimates for a call that ended in an error without figures, but not for a success that carries none', () => {
+    const failed = streamed();
+    failed.feed(JSON.stringify({ type: 'result', status: 'error', error: { message: 'quota' } }));
+    assert.deepEqual(failed.finish(1, '').tokens, ESTIMATE, 'it did spend, and the CLI never said how much');
+
+    // The CLI succeeded and stopped reporting usage (a renamed field): that must stay visible, not be papered over.
+    const drifted = streamed();
+    drifted.feed(JSON.stringify({ type: 'result', status: 'success', statistics: { models: { m: { input_tokens: 300, output_tokens: 50 } } } }));
+    const res = drifted.finish(0, '');
+    assert.equal(res.ok, true);
+    assert.deepEqual(res.tokens, { input: 0, cached: 0, output: 0 });
+  });
+
   it('counts nothing for a call that streamed nothing', () => {
     assert.deepEqual(new GeminiStreamParser().aborted().tokens, { input: 0, cached: 0, output: 0 });
   });

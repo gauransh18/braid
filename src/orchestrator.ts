@@ -359,6 +359,8 @@ export class Orchestrator {
     let fresh = true;
     /** Files with unresolved conflict markers from merging newer integration work into this branch. */
     let conflicts: string[] = [];
+    /** For those files, how many `=======` lines are content (a Markdown or RST heading underline), not a conflict separator. */
+    let underlines = new Map<string, number>();
     let leftover: string[] = [];
     s.startedAt = new Date().toISOString();
 
@@ -407,7 +409,7 @@ export class Orchestrator {
 
         if (resolving) {
           // Never commit a merge that still has markers; the next attempt finishes the job.
-          leftover = await filesWithMarkers(dir, conflicts);
+          leftover = await filesWithMarkers(dir, conflicts, underlines);
           this.store.event('resolve', { task: task.id, files: conflicts, leftover });
           if (leftover.length || !work.ok) {
             feedback.push({ attempt, reason: `Conflict resolution incomplete. Markers remain in: ${leftover.join(', ') || '(none)'}. ${work.ok ? '' : work.text.slice(0, 500)}` });
@@ -451,6 +453,7 @@ export class Orchestrator {
           const sync = await this.syncWithIntegration(task, dir);
           forkPoint = sync.head;
           conflicts = sync.conflicts;
+          underlines = await contentSeparators(dir, conflicts);
           leftover = [];
           continue;
         }
@@ -702,14 +705,36 @@ export class Orchestrator {
   }
 }
 
-const MARKER_RE = /^(<{7}|>{7})(\s|$)|^={7}$/m;
+const MARKER_RE = /^(<{7}|>{7})(\s|$)/m;
+const OPENING_RE = /^<{7}(\s|$)/gm;
+const SEPARATOR_RE = /^={7}$/gm;
 
-/** Conflicted files that still contain git conflict markers. Deleted files count as resolved. */
-async function filesWithMarkers(dir: string, files: string[]): Promise<string[]> {
+const count = (text: string, re: RegExp): number => text.match(re)?.length ?? 0;
+
+/**
+ * Per conflicted file, how many of its `=======` lines are not conflict separators. Every conflict has one opening
+ * line and one separator, so what is left over in the file as the merge wrote it is content: the underline of a
+ * Markdown or RST heading, which no resolution should be blamed for keeping. Read before the resolver touches the file.
+ */
+async function contentSeparators(dir: string, files: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (const f of files) {
+    const text = await readFile(join(dir, f), 'utf8').catch(() => '');
+    out.set(f, Math.max(0, count(text, SEPARATOR_RE) - count(text, OPENING_RE)));
+  }
+  return out;
+}
+
+/**
+ * Conflicted files that still contain conflict markers. Deleted files count as resolved. A `=======` line is a marker
+ * only beyond the `underlines` the file had as content, so a heading underline does not fail a correct resolution
+ * while a separator left behind after the other markers were removed still does.
+ */
+async function filesWithMarkers(dir: string, files: string[], underlines: ReadonlyMap<string, number> = new Map()): Promise<string[]> {
   const out: string[] = [];
   for (const f of files) {
     const text = await readFile(join(dir, f), 'utf8').catch(() => '');
-    if (MARKER_RE.test(text)) out.push(f);
+    if (MARKER_RE.test(text) || count(text, SEPARATOR_RE) > (underlines.get(f) ?? 0)) out.push(f);
   }
   return out;
 }

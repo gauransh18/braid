@@ -323,10 +323,15 @@ export class Orchestrator {
           running.set(id, this.runTask(task).finally(() => running.delete(id)));
         }
       }
+      // Whether this pass left nothing running. Tasks end while the snapshot is written, so what is running after the
+      // write says nothing about whether the pass left the run stuck.
+      const idle = running.size === 0;
       await this.save();
 
       if (running.size === 0) {
         if (Object.values(states).every((s) => TERMINAL.includes(s.status))) return;
+        // A ready task that was held back for one that ended during the write only needs another pass.
+        if (!idle) continue;
         // Pending tasks with nothing running and nothing ready means a scheduling bug; fail loudly.
         throw new Error('scheduler stalled: pending tasks but none runnable');
       }

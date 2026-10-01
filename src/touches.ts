@@ -63,14 +63,19 @@ function expandBraces(p: string, budget: { left: number }): string[] {
 function segments(raw: string): string[] {
   const p = raw.trim().toLowerCase();
   const out: string[] = [];
+  let written = '';
   for (const seg of p.split('/')) {
     if (seg === '' || seg === '.') continue;
     if (seg === '..') return ['**'];
     out.push(simplify(seg));
+    written = seg;
   }
   const last = out.at(-1);
   if (last === undefined) return ['**'];
-  if (last !== '**' && (p.endsWith('/') || looksLikeDirectory(last))) out.push('**');
+  // `[id]` is how Next.js and SvelteKit name a directory, but simplify() has made it a `?`, which looks like a wildcard
+  // and so like a file pattern. Decide on the name as written, with each bracket group counted as one plain character.
+  const directory = looksLikeDirectory(last) || looksLikeDirectory(written.replace(/\[[^\]]*\]/g, 'x'));
+  if (last !== '**' && (p.endsWith('/') || directory)) out.push('**');
   return out;
 }
 

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { spawnable } from './spawn.js';
 import type { SandboxSpec } from './types.js';
 
@@ -6,6 +7,8 @@ import type { SandboxSpec } from './types.js';
 export interface CommandSpec {
   cmd: string;
   args: string[];
+  /** Set when the command is a container run: stopping the client does not stop the container, so it is removed by name. */
+  container?: { runtime: string; name: string };
 }
 export type Wrap = (spec: CommandSpec) => CommandSpec;
 
@@ -47,13 +50,15 @@ export class Sandbox {
     return new Sandbox(spec, runtime);
   }
 
-  private runArgs(cwd: string, o: { network: boolean; interactive: boolean; env: string[]; entrypoint: string }): string[] {
+  private runArgs(cwd: string, o: { name: string; network: boolean; interactive: boolean; env: string[]; entrypoint: string }): string[] {
     const uid = process.getuid?.();
     const gid = process.getgid?.();
     return [
       'run',
       '--rm',
       '--init',
+      '--name',
+      o.name,
       ...(o.interactive ? ['-i'] : []),
       '--cap-drop',
       'ALL',
@@ -84,17 +89,31 @@ export class Sandbox {
   /** A shell command for setup or verify, run in `cwd` mounted at /work. */
   command(cwd: string, command: string, phase: 'setup' | 'verify'): CommandSpec {
     const network = phase === 'setup' || this.spec.network === true;
-    return { cmd: this.runtime, args: [...this.runArgs(cwd, { network, interactive: false, env: [], entrypoint: 'sh' }), '-c', command] };
+    const name = containerName();
+    return {
+      cmd: this.runtime,
+      args: [...this.runArgs(cwd, { name, network, interactive: false, env: [], entrypoint: 'sh' }), '-c', command],
+      container: { runtime: this.runtime, name },
+    };
   }
 
   /** Rewrites an agent CLI invocation to run inside the container, or undefined when only commands are sandboxed. */
   agentWrap(cwd: string): Wrap | undefined {
     if (!this.spec.agent) return undefined;
-    return ({ cmd, args }) => ({
-      cmd: this.runtime,
-      args: [...this.runArgs(cwd, { network: true, interactive: true, env: this.spec.env ?? [], entrypoint: cmd }), ...args],
-    });
+    return ({ cmd, args }) => {
+      const name = containerName();
+      return {
+        cmd: this.runtime,
+        args: [...this.runArgs(cwd, { name, network: true, interactive: true, env: this.spec.env ?? [], entrypoint: cmd }), ...args],
+        container: { runtime: this.runtime, name },
+      };
+    };
   }
+}
+
+/** A name braid can stop the container by, since killing the `docker run` client leaves the container running. */
+function containerName(): string {
+  return `braid-${randomBytes(6).toString('hex')}`;
 }
 
 function probe(bin: string, args: string[]): Promise<{ code: number; stderr: string; missing: boolean }> {

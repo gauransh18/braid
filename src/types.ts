@@ -19,6 +19,8 @@ export interface TaskSpec {
   /** Tools the agent may use without prompting. Headless agents cannot be asked, so anything else is denied. */
   allowedTools?: string[];
   maxTurns?: number;
+  /** Minutes one agent call may run before it is stopped (the attempt then fails and is retried). 0 = no limit. Overrides the plan default. */
+  timeoutMin?: number;
 }
 
 /** Run task commands (and optionally the agent) in a container. Needs Docker or Podman. */
@@ -44,6 +46,14 @@ export interface PlanSpec {
   concurrency?: number;
   /** Hard cap on total agent spend for the run, in USD. */
   budgetUsd?: number;
+  /**
+   * Stop scheduling once the run has used this many fresh input and output tokens (cached input is left out: it is
+   * re-read context and costs a tenth as much). Counts from the start of each `run` or `resume`, so a resumed run
+   * gets a fresh allowance. Default: 3 million per task. 0 = no limit.
+   */
+  budgetTokens?: number;
+  /** Minutes one agent call may run before it is stopped. Default 30. 0 = no limit. A task can set its own. */
+  timeoutMin?: number;
   driver?: string;
   model?: string;
   verify?: string[];

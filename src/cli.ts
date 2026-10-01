@@ -14,10 +14,12 @@ import { Git } from './git.js';
 import { fetchModels, isProvider, testProvider } from './models.js';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { constants as osConstants } from 'node:os';
 import { Orchestrator } from './orchestrator.js';
 import { describeTokens } from './tokens.js';
 import { loadPlan } from './plan.js';
 import { planGoal } from './planner.js';
+import { killAllChildren } from './proc.js';
 import { parentIsExplorer } from './winhelp.js';
 import { RunStore, stateRoot, type HarnessEvent } from './store.js';
 import type { PlanSpec, RunState } from './types.js';
@@ -27,8 +29,11 @@ const USAGE = `braid - headless multi-agent harness
 
 Usage:
   braid plan "<goal>" [--verify "npm test"]... [--out plan.json] [--driver claude] [--model M]
-  braid run <plan.json> [--concurrency N] [--replan N] [--sandbox IMAGE] [--keep-worktrees] [--watch]
-  braid resume [runId] [--concurrency N] [--keep-worktrees] [--watch]
+  braid run <plan.json> [--concurrency N] [--replan N] [--budget-tokens N] [--timeout MIN] [--sandbox IMAGE]
+                        [--keep-worktrees] [--watch]
+                                 --budget-tokens: stop starting tasks after N fresh+output tokens (default 3M per
+                                 task, 0 = no limit); --timeout: minutes one agent call may run (default 30, 0 = no limit)
+  braid resume [runId] [--concurrency N] [--budget-tokens N] [--timeout MIN] [--keep-worktrees] [--watch]
                                  continue an interrupted or failed run; merged tasks are kept
   braid watch [--port 4777] [--control]
                                  live dashboard for this repo's runs; --control adds start/stop/resume
@@ -90,6 +95,12 @@ function printEvent(e: HarnessEvent): void {
     case 'run_start':
       console.log(`${t} run started on ${e.base}; integration branch ${e.integrationBranch}`);
       break;
+    case 'agent_retry':
+      console.log(`${t} ${who} ${e.role} was turned away (${String(e.reason)}); retry ${e.retry}/${e.of} in ${Math.round(Number(e.delayMs) / 1000)}s`);
+      break;
+    case 'agent_timeout':
+      console.log(`${t} ${who} ${e.role} stopped after ${e.minutes} minutes`);
+      break;
     case 'replan':
       console.log(`${t} ${who} replan -> ${e.ok ? `replaced by ${(e.added as string[]).join(', ')}${e.reason ? ` (${e.reason})` : ''}` : `not replaced: ${String(e.reason).split('\n')[0]}`}`);
       break;
@@ -139,6 +150,27 @@ Put the file in a folder on your PATH (and rename it braid.exe) to run it as jus
   });
 }
 
+/**
+ * Commands and agents run in their own process groups, so a terminal Ctrl-C does not reach them by itself: stop them
+ * here. With `graceful`, the first signal asks it to wind down (agents stopped, merged work kept) and the second
+ * force-quits, so a call that will not die cannot trap the terminal.
+ */
+function exitOnSignals(graceful?: () => void): void {
+  let asked = false;
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      if (graceful && !asked) {
+        asked = true;
+        graceful();
+        return;
+      }
+      if (graceful) console.log('\nforce quit: killing everything still running');
+      killAllChildren();
+      process.exit(128 + (osConstants.signals[sig] ?? 2));
+    });
+  }
+}
+
 /** Newest run that did not finish cleanly. */
 async function latestUnfinished(repo: string): Promise<string> {
   const runs = await RunStore.listRuns(repo);
@@ -164,6 +196,8 @@ async function main(argv: string[]): Promise<number> {
       control: { type: 'boolean' },
       json: { type: 'boolean' },
       budget: { type: 'string' },
+      'budget-tokens': { type: 'string' },
+      timeout: { type: 'string' },
       'keep-worktrees': { type: 'boolean' },
       watch: { type: 'boolean' },
       port: { type: 'string' },
@@ -178,6 +212,7 @@ async function main(argv: string[]): Promise<number> {
     return values.help ? 0 : 1;
   }
   const port = values.port ? Number(values.port) : undefined;
+  if (cmd !== 'run' && cmd !== 'resume') exitOnSignals();
 
   if (cmd === 'demo') {
     const orch = await createDemoRun();
@@ -246,12 +281,14 @@ demo finished. Dashboard stays up at ${watch.url} - Ctrl-C to exit.`);
     }
     if (values.concurrency) plan.concurrency = Number(values.concurrency);
     if (values.budget) plan.budgetUsd = Number(values.budget);
+    if (values['budget-tokens']) plan.budgetTokens = Number(values['budget-tokens']);
+    if (values.timeout) plan.timeoutMin = Number(values.timeout);
     if (values.replan) plan.maxReplans = Number(values.replan);
     if (values.sandbox) plan.sandbox = { ...plan.sandbox, image: values.sandbox };
     if (values.driver) plan.driver = values.driver;
     const ac = new AbortController();
-    process.on('SIGINT', () => {
-      console.log('\ninterrupt: stopping agents, keeping merged work...');
+    exitOnSignals(() => {
+      console.log('\ninterrupt: stopping agents, keeping merged work... (Ctrl-C again to force quit)');
       ac.abort();
     });
     const orch = new Orchestrator({ repo, plan, drivers: registry(), signal: ac.signal, keepWorktrees: values['keep-worktrees'], runId, resume: cmd === 'resume' });

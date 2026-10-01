@@ -38,7 +38,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 if (a[0] === 'info') process.exit(0);
-const withValue = new Set(['--entrypoint', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--user', '--network', '-v', '-w', '-e', '--tmpfs']);
+const withValue = new Set(['--name', '--entrypoint', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--user', '--network', '-v', '-w', '-e', '--tmpfs']);
 let i = 1, host = process.cwd(), entry = null;
 for (; i < a.length && a[i].startsWith('-'); i++) {
   if (a[i] === '-v') host = a[i + 1].split(':/work')[0];

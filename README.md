@@ -116,6 +116,8 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `base` | plan | Branch to start from (default: current) |
 | `concurrency` | plan | Maximum tasks running at once (default 3) |
 | `budgetUsd` | plan | Optional, advanced: stop scheduling once this much has been spent. Nothing in the app or CLI asks for it or shows cost |
+| `budgetTokens` | plan | Stop starting tasks once the run has used this many fresh input and output tokens (cached input is not counted). Default 3 million per task; `0` means no limit. Counts from each `braid run` or `braid resume`, so a resumed run gets a fresh allowance. Also `--budget-tokens N` |
+| `timeoutMin` | both | Minutes one agent call may run before it is stopped and the attempt retried. Default 30; `0` means no limit. Also `--timeout MIN` |
 | `maxReplans` | plan | Times the planner may split or rewrite a task that failed for good (default 0, off) |
 | `sandbox` | plan | Run setup, verify and optionally the agent in a Docker/Podman container. See [Sandbox](#sandbox) |
 | `setup` | plan | Commands run in each fresh worktree, e.g. `npm ci` |
@@ -128,6 +130,13 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `id`, `title`, `prompt`, `deps` | task | The task itself |
 
 Values set on a task override the plan-level values.
+
+## Stopping and limits
+
+- **Stop.** Ctrl-C, or **Stop** in the dashboard, stops the agents and any setup or verify command that is running, together with everything they started. Merged work stays; `braid resume` continues. A second Ctrl-C quits at once.
+- **Stuck commands.** A setup or verify command that runs longer than 10 minutes is killed with its children and reported as timed out. A sandbox container is removed by name, so a killed run leaves none behind.
+- **Provider trouble is not the task's fault.** When an agent call fails because of a rate limit, an overloaded API or a dropped connection, braid waits (20, 40, 80, then 160 seconds) and tries the call again without using up one of the task's attempts or telling the agent its work was rejected. If it keeps failing, the task fails as `agent unavailable`. If the account is out of usage or credit, no new task starts and `braid resume` carries on once it is back.
+- **Safety limits.** Every run has them even if the plan sets none: an agent call is stopped after 30 minutes (`timeoutMin`), and the run stops starting tasks after 3 million fresh and output tokens per task (`budgetTokens`). They stop a runaway, not a big task; raise or switch them off in the plan.
 
 ## Sandbox
 

@@ -3,6 +3,9 @@ import type { PlanSpec, TaskSpec } from './types.js';
 
 export const DEFAULT_ALLOWED_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'];
+/** Safety nets for a run that sets no limits of its own. Generous: they stop a runaway, not a big task. */
+export const DEFAULT_TIMEOUT_MIN = 30;
+export const DEFAULT_TOKENS_PER_TASK = 3_000_000;
 
 export interface ResolvedTask extends Required<Omit<TaskSpec, 'model' | 'maxTurns'>> {
   model?: string;
@@ -28,7 +31,10 @@ export function validatePlan(plan: PlanSpec): void {
     if (ids.has(t.id)) errors.push(`duplicate task id "${t.id}"`);
     ids.add(t.id);
     if (!t.prompt) errors.push(`task "${t.id}" has no prompt`);
+    checkLimit(errors, `task "${t.id}" timeoutMin`, t.timeoutMin);
   }
+  checkLimit(errors, 'plan.budgetTokens', plan?.budgetTokens);
+  checkLimit(errors, 'plan.timeoutMin', plan?.timeoutMin);
   for (const t of plan?.tasks ?? []) {
     for (const d of t.deps ?? []) if (!ids.has(d)) errors.push(`task "${t.id}" depends on unknown "${d}"`);
   }
@@ -43,6 +49,10 @@ export function validatePlan(plan: PlanSpec): void {
     if (cycle) errors.push(`dependency cycle: ${cycle.join(' -> ')}`);
   }
   if (errors.length) throw new Error(`invalid plan:\n  - ${errors.join('\n  - ')}`);
+}
+
+function checkLimit(errors: string[], name: string, value: unknown): void {
+  if (value !== undefined && !(typeof value === 'number' && Number.isFinite(value) && value >= 0)) errors.push(`${name} must be a number, 0 or more (0 turns the limit off)`);
 }
 
 function findCycle(tasks: TaskSpec[]): string[] | null {
@@ -83,6 +93,7 @@ export function resolveTask(plan: PlanSpec, t: TaskSpec): ResolvedTask {
     maxAttempts: Math.max(1, t.maxAttempts ?? plan.maxAttempts ?? 2),
     allowedTools: t.allowedTools ?? plan.allowedTools ?? DEFAULT_ALLOWED_TOOLS,
     maxTurns: t.maxTurns ?? plan.maxTurns,
+    timeoutMin: t.timeoutMin ?? plan.timeoutMin ?? DEFAULT_TIMEOUT_MIN,
   };
 }
 

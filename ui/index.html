@@ -866,6 +866,14 @@ function runOutcome() {
     return { kind: 'done', icon: '&#10003;', label: 'done', bubble: `All ${plural(total, 'strand')} braided. Review ${branch} and merge it when you're happy.`,
       title: `All ${plural(total, 'strand')} are in the braid`, detail: `Review the work on <code>${esc(branch)}</code>, then merge it when you are happy with it.`, copy: `git merge ${branch}`, copyLabel: 'Copy merge command' };
   }
+  // Stopped by a limit: a task caught mid-retry is failed, the ones that never started are skipped.
+  const limited = (t) => /budget exhausted/i.test(t.error || '');
+  const byTokens = [...failed, ...skipped].some((t) => /token budget exhausted/i.test(t.error || ''));
+  if (byTokens && failed.every(limited)) {
+    const unfinished = failed.length + skipped.length;
+    return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the token limit. ${inBraid} of ${total} strands made it in.`,
+      title: 'Stopped: the token limit was reached', detail: `Every run has a safety limit on the tokens it may use (3 million per task unless the plan says otherwise), so a loop that keeps retrying cannot spend without end. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish. Resume gives the run a fresh allowance. To raise it, set <code>budgetTokens</code> in the plan (0 means no limit).` };
+  }
   if (failed.length) {
     const why = failed.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>: ${esc(first(t))}`).join('<br>');
     return { kind: 'attention', icon: '&#9888;', label: 'needs attention', bubble: `${plural(failed.length, 'strand')} got tangled. ${inBraid} of ${total} made it in.`,
@@ -1302,6 +1310,8 @@ const EV_TEXT = {
   run_error: (e) => [`Run error: ${String(e.message || '').split('\n')[0].slice(0, 140)}`, 'err'],
   replan: (e) => [e.ok ? `replanned into ${(e.added || []).join(', ')}` : `replan failed: ${String(e.reason || '').split('\n')[0].slice(0, 100)}`, e.ok ? 'ok' : 'err'],
   sandbox: (e) => [`sandbox: ${e.runtime} ${e.image}${e.agent ? ' (agent inside)' : ''}`, ''],
+  agent_retry: (e) => [`${e.task}: the ${e.role} was turned away (${String(e.reason || '').slice(0, 80)}); trying again in ${Math.round((e.delayMs || 0) / 1000)}s`, 'err'],
+  agent_timeout: (e) => [`${e.task}: the ${e.role} was stopped after ${e.minutes} minutes`, 'err'],
 };
 function renderFeed() {
   const list = $('feed');

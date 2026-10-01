@@ -881,7 +881,7 @@ function runOutcome() {
     const also = alone.length ? ` ${plural(alone.length, 'task')} also failed on their own; open them to see why.` : '';
     if (stopped.some((t) => /token budget exhausted/i.test(t.error || ''))) {
       return { kind: 'limit', icon: '&#9208;', label: 'stopped at limit', bubble: `Stopped at the token limit. ${inBraid} of ${total} strands made it in.`,
-        title: 'Stopped: the token limit was reached', detail: `This plan caps the tokens the whole run may use (<code>budgetTokens</code>), and the run reached it${numbers(stopped.find((t) => /token budget exhausted/i.test(t.error || '')))}. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume gives the run a fresh allowance. To raise it, change <code>budgetTokens</code> in the plan (0 means no limit).` };
+        title: 'Stopped: the token limit was reached', detail: `The run reached its run-wide token limit${numbers(stopped.find((t) => /token budget exhausted/i.test(t.error || '')))}: <code>budgetTokens</code> in the plan, or the default pool that older versions applied when the plan set none. ${inBraid} of ${total} strands are in the braid and ${plural(unfinished, 'task')} did not finish.${also} Resume gives the run a fresh allowance. To raise it, change <code>budgetTokens</code> in the plan (0 means no limit).` };
     }
     if (stopped.some(quotaHit)) {
       return { kind: 'limit', icon: '&#9208;', label: 'agent out of usage', bubble: `The agent is out of usage. ${inBraid} of ${total} strands made it in.`,
@@ -899,9 +899,12 @@ function runOutcome() {
     const names = overAllowance.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>`).join(' and ') + (overAllowance.length > 2 ? ` and ${overAllowance.length - 2} more` : '');
     const waiting = blocked.length ? ` ${plural(blocked.length, 'task')} that waited on ${one ? 'it' : 'them'} could not start.` : '';
     const rest = others ? ` ${plural(others, 'other task')} failed on ${others === 1 ? 'its' : 'their'} own; open ${others === 1 ? 'it' : 'them'} to see why.` : '';
+    // "Carried on" is only true of a run that went on without them: not after a Stop, which skipped what had not started, and not when everything else only waited for them.
+    const carriedOn = st.status !== 'aborted' && tasks.some((t) => !overAllowance.includes(t) && ['done', 'replaced', 'failed'].includes(t.status));
+    const then = st.status === 'aborted' ? '; the run was then stopped, so the tasks that had not started never did' : carriedOn ? '; the other tasks carried on' : '';
     return { kind: 'limit', icon: '&#9208;', label: 'task hit its limit', bubble: `${one ? 'A strand' : plural(overAllowance.length, 'strand')} used up ${one ? 'its' : 'their'} token allowance. ${inBraid} of ${total} made it in.`,
       title: one ? 'One task used up its token allowance' : `${overAllowance.length} tasks used up their token allowance`,
-      detail: `Each task has a safety limit on the tokens its agents may use, so one that keeps retrying cannot spend without end. ${names} reached it${one ? numbers(lead) : ''} and ${one ? 'was' : 'were'} stopped${total > overAllowance.length ? '; the other tasks carried on' : ''}.${waiting}${rest} ${inBraid} of ${total} strands are in the braid. Resume gives each unfinished task a fresh allowance. To raise it, set <code>taskBudgetTokens</code> in the plan, or <code>budgetTokens</code> on one task (0 means no limit).`, open: lead.id, openLabel: `See why: ${name(lead.id)}` };
+      detail: `Each task has a safety limit on the tokens its agents may use, so one that keeps retrying cannot spend without end. ${names} reached it${one ? numbers(lead) : ''} and ${one ? 'was' : 'were'} stopped${then}.${waiting}${rest} ${inBraid} of ${total} strands are in the braid. Resume gives each unfinished task a fresh allowance. To raise it, set <code>taskBudgetTokens</code> in the plan, or <code>budgetTokens</code> on one task (0 means no limit).`, open: lead.id, openLabel: `See why: ${name(lead.id)}` };
   }
   if (failed.length) {
     const why = failed.slice(0, 2).map((t) => `<b style="color:var(--text)">${esc(name(t.id))}</b>: ${esc(first(t))}`).join('<br>');
@@ -993,7 +996,12 @@ function captionFor(t, s) {
   switch (s.status) {
     case 'pending': {
       const waiting = (t.deps || []).filter((d) => S.state.tasks[d]?.status !== 'done');
-      if (!waiting.length) return 'Ready: waiting for a free agent';
+      if (!waiting.length) {
+        // A free agent is not what it lacks when the scheduler is keeping it apart from a running task that changes the same files.
+        const held = (s.heldBy || []).filter((id) => S.state.tasks[id]);
+        if (held.length) return `Waiting for ${held.slice(0, 2).map(name).join(' and ')}${held.length > 2 ? ` and ${held.length - 2} more` : ''}: ${held.length === 1 ? 'it changes' : 'they change'} the same files`;
+        return 'Ready: waiting for a free agent';
+      }
       return `Waiting for ${waiting.slice(0, 2).map(name).join(' and ')}${waiting.length > 2 ? ` and ${waiting.length - 2} more` : ''}`;
     }
     case 'running': return `Knitting its strand${retry}`;

@@ -81,6 +81,39 @@ describe('the scheduler', () => {
     assert.equal(orch.state.tasks.b!.status, 'done');
   });
 
+  it('records which running tasks hold a ready task back, for the dashboard, and forgets it once the task starts', async () => {
+    const orch = await scheduler(overlapping);
+    const seen: Record<string, string[] | undefined> = {};
+    orch.runTask = async (task) => {
+      if (task.id === 'x') {
+        await sleep(10);
+        seen.whileXRuns = orch.state.tasks.b!.heldBy;
+        await sleep(10);
+      } else seen.whenBStarts = orch.state.tasks.b!.heldBy;
+      orch.state.tasks[task.id]!.status = 'done';
+    };
+    orch.save = async () => undefined;
+    await orch.schedule();
+    assert.deepEqual(seen.whileXRuns, ['x'], 'b has a free slot, so a free agent is not what it waits for');
+    assert.equal(seen.whenBStarts, undefined, 'a task that has started is not "held back"');
+    assert.equal(orch.state.tasks.x!.heldBy, undefined);
+  });
+
+  it('does not say a task is held back when it only waits for a slot', async () => {
+    const orch = await scheduler({ ...overlapping, concurrency: 1 });
+    let held: string[] | undefined = ['unset'];
+    orch.runTask = async (task) => {
+      if (task.id === 'x') {
+        await sleep(10);
+        held = orch.state.tasks.b!.heldBy;
+      }
+      orch.state.tasks[task.id]!.status = 'done';
+    };
+    orch.save = async () => undefined;
+    await orch.schedule();
+    assert.equal(held, undefined, 'with one slot the reason is the slot, whatever the touches say');
+  });
+
   it('still fails loudly when nothing is running and a task can never start', async () => {
     // x is neither done nor running anywhere, so b, which waits for it, can never be started.
     const orch = await scheduler({ ...overlapping, tasks: [{ id: 'x', title: 'X', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p', deps: ['x'] }] }, { x: 'merging' });

@@ -44,6 +44,20 @@ describe('dashboard banner for token limits', () => {
     assert.ok(!/whole run/.test(o.detail), 'it is not the run-wide limit');
   });
 
+  it('does not say the other tasks carried on after a Stop, or when they only waited for the task that ran out', () => {
+    // The run was stopped: what had not started was skipped, so nothing carried on.
+    const stopped = outcome({ a: { status: 'done' }, b: { status: 'failed', error: TASK_LIMIT }, c: { status: 'skipped', error: 'run aborted' }, d: { status: 'skipped', error: 'run aborted' } }, 'aborted');
+    assert.equal(stopped.label, 'task hit its limit');
+    assert.ok(!/carried on/.test(stopped.detail), stopped.detail);
+    assert.match(stopped.detail, /and was stopped; the run was then stopped, so the tasks that had not started never did\./);
+    assert.match(stopped.detail, /1 of 4 strands are in the braid\./);
+
+    // Everything else depended on it: nothing went on without it either.
+    const waited = outcome({ a: { status: 'failed', error: TASK_LIMIT }, b: { status: 'blocked', error: 'dependency "a" did not complete' }, c: { status: 'blocked', error: 'dependency "b" did not complete' } });
+    assert.ok(!/carried on/.test(waited.detail), waited.detail);
+    assert.match(waited.detail, /and was stopped\. 2 tasks that waited on it could not start\./);
+  });
+
   it('counts several tasks that ran out, and the ones that failed for another reason', () => {
     const o = outcome({ a: { status: 'done' }, b: { status: 'failed', error: TASK_LIMIT }, c: { status: 'failed', error: TASK_LIMIT }, d: { status: 'failed', error: 'Verification failed' } });
     assert.equal(o.title, '2 tasks used up their token allowance');
@@ -55,7 +69,8 @@ describe('dashboard banner for token limits', () => {
     const o = outcome({ a: { status: 'done' }, b: { status: 'skipped', error: RUN_LIMIT }, c: { status: 'failed', error: RUN_LIMIT } });
     assert.equal(o.label, 'stopped at limit');
     assert.equal(o.title, 'Stopped: the token limit was reached');
-    assert.match(o.detail, /caps the tokens the whole run may use \(<code>budgetTokens<\/code>\)/);
+    assert.match(o.detail, /run-wide token limit \(1\.2k fresh and output tokens used; the limit is 1k\): <code>budgetTokens<\/code> in the plan, or the default pool that older versions applied/);
+    assert.ok(!/This plan caps/.test(o.detail), 'a run recorded before the upgrade stopped at the old pool, so the plan need not have set budgetTokens');
     assert.match(o.detail, /\(1\.2k fresh and output tokens used; the limit is 1k\)/);
     assert.ok(!/3 million/.test(o.detail), 'there is no default pool any more');
   });

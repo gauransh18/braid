@@ -139,6 +139,8 @@ export interface TaskState {
   error?: string;
   startedAt?: string;
   endedAt?: string;
+  /** Set on a pending task that is ready and has a free slot but is held back because tasks that are running change the same paths (`touches`): their ids. */
+  heldBy?: string[];
   /** Set on a replaced task: the tasks that took its place. */
   replacedBy?: string[];
   /** Set on a task the planner created: the failed task it replaces. */

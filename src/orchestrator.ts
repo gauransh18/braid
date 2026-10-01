@@ -334,9 +334,12 @@ export class Orchestrator {
         const s = states[id]!;
         if (s.status !== 'pending' || running.has(id)) continue;
         const ready = task.deps.every((d) => states[d]!.status === 'done');
-        if (ready && running.size < concurrency && !this.overlapsRunning(task, running)) {
-          running.set(id, this.runTask(task).finally(() => running.delete(id)));
-        }
+        const free = ready && running.size < concurrency;
+        // Say why a task with a free slot still waits, so the dashboard need not guess that it is short of an agent.
+        const holders = free ? this.overlapping(task, running) : [];
+        if (holders.length) s.heldBy = holders;
+        else delete s.heldBy;
+        if (free && !holders.length) running.set(id, this.runTask(task).finally(() => running.delete(id)));
       }
       // Whether this pass left nothing running. Tasks end while the snapshot is written, so what is running after the
       // write says nothing about whether the pass left the run stuck.
@@ -355,15 +358,12 @@ export class Orchestrator {
   }
 
   /**
-   * Whether a task that could start would change the same paths as one that has. Counts everything in `running`, not
-   * just tasks whose status says so: one still in worktree setup is "pending" but already owns its paths. With nothing
-   * running this is false, so overlapping tasks wait for each other but the scheduler cannot stall on them.
+   * The tasks that have started and would change the same paths as this one. Counts everything in `running`, not just
+   * tasks whose status says so: one still in worktree setup is "pending" but already owns its paths. With nothing
+   * running this is empty, so overlapping tasks wait for each other but the scheduler cannot stall on them.
    */
-  private overlapsRunning(task: ResolvedTask, running: ReadonlyMap<string, unknown>): boolean {
-    for (const id of running.keys()) {
-      if (id !== task.id && touchesOverlap(task.touches, this.tasks.get(id)?.touches ?? [])) return true;
-    }
-    return false;
+  private overlapping(task: ResolvedTask, running: ReadonlyMap<string, unknown>): string[] {
+    return [...running.keys()].filter((id) => id !== task.id && touchesOverlap(task.touches, this.tasks.get(id)?.touches ?? []));
   }
 
   /** Run a setup or verify command on the host, or in the sandbox container when the plan has one. */

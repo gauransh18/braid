@@ -151,6 +151,10 @@ export class RunManager {
   private checkEnabled(plan: PlanSpec): void {
     const main = plan.driver ?? this.effectiveDriver();
     const used = new Set([main, ...(plan.tasks ?? []).map((t) => t.driver ?? main)]);
+    // A reviewer is an agent the run calls too, but only for tasks that are reviewed.
+    for (const t of plan.tasks ?? []) {
+      if (t.review ?? plan.review) used.add(t.reviewer?.driver ?? plan.reviewer?.driver ?? t.driver ?? main);
+    }
     for (const agent of used) {
       if (this.isDisabled(agent)) throw new HttpError(400, `The ${agent} agent is switched off in Settings. Switch it on there, or choose another agent in the plan.`);
     }
@@ -166,7 +170,12 @@ export class RunManager {
     for (const t of out.tasks ?? []) {
       // A task on a different agent than the plan's would otherwise inherit the wrong agent's model.
       if (t.driver && t.driver !== main && !t.model && d.models?.[t.driver]) t.model = d.models[t.driver];
+      // Same for a reviewer on another agent (the task's own model already follows its own agent, set above).
+      const r = t.reviewer;
+      if (r?.driver && r.driver !== main && r.driver !== (t.driver ?? main) && !r.model && d.models?.[r.driver]) r.model = d.models[r.driver];
     }
+    const r = out.reviewer;
+    if (r?.driver && r.driver !== main && !r.model && d.models?.[r.driver]) r.model = d.models[r.driver];
     return out;
   }
 

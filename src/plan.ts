@@ -10,6 +10,8 @@ export const DEFAULT_TOKENS_PER_TASK = 3_000_000;
 export interface ResolvedTask extends Required<Omit<TaskSpec, 'model' | 'maxTurns'>> {
   model?: string;
   maxTurns?: number;
+  /** Who reviews the diff: the driver always set (the task's own unless a reviewer names another). */
+  reviewer: { driver: string; model?: string };
 }
 
 export async function loadPlan(path: string): Promise<PlanSpec> {
@@ -32,7 +34,12 @@ export function validatePlan(plan: PlanSpec): void {
     ids.add(t.id);
     if (!t.prompt) errors.push(`task "${t.id}" has no prompt`);
     checkLimit(errors, `task "${t.id}" timeoutMin`, t.timeoutMin);
+    checkStrings(errors, `task "${t.id}" touches`, t.touches, true);
+    checkStrings(errors, `task "${t.id}" verifyMerge`, t.verifyMerge, false);
+    checkReviewer(errors, `task "${t.id}" reviewer`, t.reviewer);
   }
+  checkStrings(errors, 'plan.verifyMerge', plan?.verifyMerge, false);
+  checkReviewer(errors, 'plan.reviewer', plan?.reviewer);
   checkLimit(errors, 'plan.budgetTokens', plan?.budgetTokens);
   checkLimit(errors, 'plan.timeoutMin', plan?.timeoutMin);
   for (const t of plan?.tasks ?? []) {
@@ -49,6 +56,26 @@ export function validatePlan(plan: PlanSpec): void {
     if (cycle) errors.push(`dependency cycle: ${cycle.join(' -> ')}`);
   }
   if (errors.length) throw new Error(`invalid plan:\n  - ${errors.join('\n  - ')}`);
+}
+
+/** An optional array of non-empty strings (`touches`, `verifyMerge`). An empty array is allowed: nothing listed. */
+function checkStrings(errors: string[], name: string, value: unknown, patterns: boolean): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.some((x) => typeof x !== 'string' || !x.trim())) {
+    errors.push(`${name} must be an array of non-empty strings${patterns ? ' (paths or globs such as "src/auth/**")' : ' (shell commands)'}`);
+  }
+}
+
+function checkReviewer(errors: string[], name: string, value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    errors.push(`${name} must be an object like {"driver": "codex", "model": "..."}`);
+    return;
+  }
+  for (const key of ['driver', 'model'] as const) {
+    const v = (value as Record<string, unknown>)[key];
+    if (v !== undefined && (typeof v !== 'string' || !v.trim())) errors.push(`${name}.${key} must be a non-empty string`);
+  }
 }
 
 function checkLimit(errors: string[], name: string, value: unknown): void {
@@ -79,16 +106,35 @@ function findCycle(tasks: TaskSpec[]): string[] | null {
   return null;
 }
 
+/**
+ * The reviewer of a task: fields on the task win over the plan's, and the task's own agent and model fill the rest. A
+ * model belongs to one agent, so one is only carried over to a reviewer on the agent it was meant for.
+ */
+function resolveReviewer(plan: PlanSpec, t: TaskSpec, driver: string, model: string | undefined): ResolvedTask['reviewer'] {
+  const own = t.reviewer;
+  const shared = plan.reviewer;
+  const rdriver = own?.driver ?? shared?.driver ?? driver;
+  const sharedModel = shared?.model && rdriver === (shared.driver ?? driver) ? shared.model : undefined;
+  const fallback = rdriver === driver ? model : rdriver === (plan.driver ?? 'claude') ? plan.model : undefined;
+  return { driver: rdriver, model: own?.model ?? sharedModel ?? fallback };
+}
+
 /** Apply plan-level defaults to a task. */
 export function resolveTask(plan: PlanSpec, t: TaskSpec): ResolvedTask {
+  const driver = t.driver ?? plan.driver ?? 'claude';
+  const model = t.model ?? plan.model;
+  const verify = t.verify ?? plan.verify ?? [];
   return {
     id: t.id,
     title: t.title ?? t.id,
     prompt: t.prompt,
     deps: t.deps ?? [],
-    driver: t.driver ?? plan.driver ?? 'claude',
-    model: t.model ?? plan.model,
-    verify: t.verify ?? plan.verify ?? [],
+    driver,
+    model,
+    verify,
+    verifyMerge: t.verifyMerge ?? plan.verifyMerge ?? verify,
+    touches: t.touches ?? [],
+    reviewer: resolveReviewer(plan, t, driver, model),
     review: t.review ?? plan.review ?? false,
     maxAttempts: Math.max(1, t.maxAttempts ?? plan.maxAttempts ?? 2),
     allowedTools: t.allowedTools ?? plan.allowedTools ?? DEFAULT_ALLOWED_TOOLS,

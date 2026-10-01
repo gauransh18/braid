@@ -2,7 +2,8 @@
 # output without notice, and the unit tests only know the shapes we captured once. This runs a two-task plan through the
 # built braid with every agent whose API key is a repository secret (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
 # NVIDIA_API_KEY) and fails when a run, a merge, the files or the token counts are not what they should be. An agent whose
-# secret is absent is skipped with a warning. See scripts/canary.mjs. Costs a few cents per agent; set the repository
+# secret is absent is skipped with a warning, unless it was asked for by name or none could run at all: then the job
+# fails. See scripts/canary.mjs. Costs a few cents per agent; set the repository
 # variables CANARY_MODEL_CLAUDE, CANARY_MODEL_CODEX, CANARY_MODEL_GEMINI or CANARY_MODEL_NIM to pick cheaper models.
 name: canary
 on:
@@ -40,7 +41,8 @@ jobs:
           CANARY_MODEL_GEMINI: ${{ vars.CANARY_MODEL_GEMINI }}
           CANARY_MODEL_NIM: ${{ vars.CANARY_MODEL_NIM }}
           DRIVERS: ${{ inputs.drivers }}
-        run: node scripts/canary.mjs --require-keys --dir canary-out ${DRIVERS:+--drivers "$DRIVERS"}
+        # An agent asked for by name has to run: with --strict, a missing secret fails the job instead of passing it.
+        run: node scripts/canary.mjs --require-keys --dir canary-out ${DRIVERS:+--drivers "$DRIVERS" --strict}
       # What braid recorded for each agent (events, transcripts), to see what changed in the output.
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}

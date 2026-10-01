@@ -6,7 +6,8 @@
 // tokens and a summary were reported. Those last two are what silently stop working when an agent CLI renames a field in its
 // output. Usable: claude, codex and gemini when the CLI is on PATH; nim when NVIDIA_API_KEY is set. --require-keys also wants a
 // CLI's API key in the environment (CI installs every CLI but only some secrets exist). An unusable driver is skipped with a
-// message, or fails with --strict. Exit status: 1 if any driver failed, else 0.
+// message, or fails with --strict; with --require-keys, so does a run in which no driver could be run at all. Exit status:
+// 1 if any driver failed, else 0.
 //
 // Real runs cost a few cents each. CANARY_MODEL_<DRIVER> (e.g. CANARY_MODEL_CLAUDE=haiku) picks a cheaper model.
 // --fake only: CANARY_FAKE_DRIFT=claude:usage,gemini:result makes that stand-in change its output the way a CLI update
@@ -94,7 +95,9 @@ async function main() {
   const passed = results.length - failed.length - skipped.length;
   console.log(`\n${passed} passed, ${failed.length} failed, ${skipped.length} skipped`);
   if (!passed && !failed.length) console.log('Nothing ran: no usable agent. Install an agent CLI and sign in, or set NVIDIA_API_KEY.');
-  const bad = failed.length > 0 || (values.strict && skipped.length > 0);
+  // With --require-keys the run is the scheduled check, whose whole point is to talk to real agents: all of them being
+  // skipped (a secret lost or mistyped) is a canary that tested nothing, which must not look like a pass.
+  const bad = failed.length > 0 || (values.strict && skipped.length > 0) || (values['require-keys'] && !passed);
   if (failed.length || values.keep || values.dir) console.log(`kept ${work}`);
   else rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   return bad ? 1 : 0;

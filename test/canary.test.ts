@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +100,28 @@ describe('the canary script', { skip }, () => {
     assert.match(r.out, /^ok   gemini/m);
     assert.match(r.out, /^ok   nim/m);
     assert.match(r.out, /2 passed, 0 failed, 2 skipped/);
+  });
+
+  it('with --require-keys, a run in which every driver was skipped fails instead of passing having tested nothing', async () => {
+    const none = await canary(['--fake', '--require-keys', '--drivers', 'claude'], { ANTHROPIC_API_KEY: '' });
+    assert.equal(none.code, 1, none.out);
+    assert.match(none.out, /skip claude: +ANTHROPIC_API_KEY is not set/);
+    assert.match(none.out, /0 passed, 0 failed, 1 skipped/);
+    // Some skipped and some run is the normal state of a repository with only some of the secrets.
+    const some = await canary(['--fake', '--require-keys', '--drivers', 'claude,nim'], { ANTHROPIC_API_KEY: '' });
+    assert.equal(some.code, 0, some.out);
+    // Without --require-keys (a person running it by hand) nothing running is still not an error.
+    assert.equal((await canary([], NO_AGENTS)).code, 0);
+  });
+
+  it('is run by the workflow with --strict when agents were asked for by name, and not otherwise', () => {
+    const yml = readFileSync(fileURLToPath(new URL('../../.github/workflows/canary.yml', import.meta.url)), 'utf8');
+    const line = /^\s*run: (node scripts\/canary\.mjs .*)$/m.exec(yml)?.[1];
+    assert.ok(line, 'the workflow runs the canary');
+    // The same line, with the script replaced by echo, as the shell the workflow uses expands it.
+    const expand = (drivers: string) => spawnSync('bash', ['-c', line.replace('node scripts/canary.mjs', 'echo')], { env: { ...process.env, DRIVERS: drivers }, encoding: 'utf8' }).stdout.trim();
+    assert.equal(expand('claude'), '--require-keys --dir canary-out --drivers claude --strict');
+    assert.equal(expand(''), '--require-keys --dir canary-out');
   });
 
   it('runs only the drivers it is asked for, and refuses a name it does not know', async () => {

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { appendFile, readFile, mkdir, rm, stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { appendFile, readFile, readdir, mkdir, rm, stat } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { abortError, exec, type ExecResult } from './proc.js';
 
 const FALLBACK_IDENTITY = ['-c', 'user.name=braid', '-c', 'user.email=braid@localhost'];
@@ -80,12 +80,44 @@ export class Git {
     try {
       const { stdout } = await this.run(['rev-parse', '--git-path', 'index.lock'], cwd);
       const lock = resolve(cwd, stdout.trim());
-      const made = await stat(lock).catch(() => null);
-      if (made && made.mtimeMs >= since - MTIME_SLACK_MS && gitProcessNames([resolve(cwd), dirname(lock)]) === false) await rm(lock, { force: true });
+      await this.dropLock(lock, since, [resolve(cwd), dirname(lock)]);
+      // The lock on the branch the command was moving: it lives with the repository, not in the worktree, so removing
+      // the worktree does not clear it, and the next reset of this branch would fail on it.
+      const head = (await this.run(['symbolic-ref', '-q', 'HEAD'], cwd, true)).stdout.trim();
+      if (head.startsWith('refs/heads/')) await this.dropLock(resolve(cwd, (await this.run(['rev-parse', '--git-path', `${head}.lock`], cwd)).stdout.trim()), since, [resolve(cwd)]);
       if (await this.inMerge(cwd)) await this.run(['merge', '--abort'], cwd, true);
     } catch {
       /* what could not be cleaned up is left for the worktree's removal */
     }
+  }
+
+  /**
+   * Remove a lock file left behind when a git was killed, but only a stale one: made since `since` (when given; an
+   * older one may belong to someone else) and with no git process naming any of `names` (a live git holds its own).
+   * False when it was left alone, or when nobody can say whether a git is running (Windows).
+   */
+  private async dropLock(lock: string, since: number | undefined, names: string[]): Promise<boolean> {
+    const made = await stat(lock).catch(() => null);
+    if (!made || (since !== undefined && made.mtimeMs < since - MTIME_SLACK_MS) || gitProcessNames(names) !== false) return false;
+    await rm(lock, { force: true });
+    return true;
+  }
+
+  /**
+   * At the start of a resume: remove the ref locks that the run's branches were left with by a git that was killed
+   * outright (a second Ctrl-C, a crash). Nothing of the run is alive then, and without this the `worktree add` of such
+   * a task branch and the reset of the integration branch fail on 'cannot lock ref', the same way on every resume.
+   * Only under this run's own branch names. Returns the lock names it removed.
+   */
+  async clearRunLocks(runId: string): Promise<string[]> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) return [];
+    const common = resolve(this.repo, (await this.run(['rev-parse', '--git-common-dir'])).stdout.trim());
+    const dir = join(common, 'refs', 'heads', 'braid', runId);
+    const removed: string[] = [];
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (name.endsWith('.lock') && (await this.dropLock(join(dir, name), undefined, [this.repo]))) removed.push(name);
+    }
+    return removed;
   }
 
   private async pin(path: string): Promise<void> {
@@ -125,10 +157,12 @@ export class Git {
     const args = ['worktree', 'add', '-b', newBranch, path, from];
     if (!stoppable) await this.run(args);
     else {
-      await this.stoppable(args, this.repo, false, async () => {
-        // A killed `worktree add` leaves a locked, half-made worktree and the new branch.
+      await this.stoppable(args, this.repo, false, async (startedAt) => {
+        // A killed `worktree add` leaves a locked, half-made worktree and the new branch, and can leave the lock on its ref.
         await this.removeWorktree(path);
         await rm(path, { recursive: true, force: true });
+        const { stdout } = await this.run(['rev-parse', '--git-path', `refs/heads/${newBranch}.lock`]);
+        await this.dropLock(resolve(this.repo, stdout.trim()), startedAt, [resolve(path)]);
         await this.deleteBranch(newBranch);
       });
     }

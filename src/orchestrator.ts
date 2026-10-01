@@ -152,6 +152,9 @@ export class Orchestrator {
         this.sandbox = this.opts.sandbox ?? (await Sandbox.create(plan.sandbox, this.opts.signal));
       }
       if (previous) {
+        // A git that was killed outright can have left a lock on a branch of this run, which fails every resume the same way.
+        const locks = await this.git.clearRunLocks(this.runId);
+        if (locks.length) this.store.event('stale_locks_removed', { locks });
         await this.git.removeWorktree(this.integrationDir);
         await this.git.attachWorktree(this.integrationDir, this.state.integrationBranch);
         // Rewind to the last verified state: a crash mid-merge may have left an unverified commit or markers.

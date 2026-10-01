@@ -48,10 +48,13 @@ export function classifyAgentFailure(text: string): AgentFailureKind | null {
   return null;
 }
 
-/** An agent call that kept failing for reasons outside the work. The task fails without using up its attempts. */
+/**
+ * An agent call that kept failing for reasons outside the work. The task fails without using up its attempts. `kind`
+ * is what the provider said, or `missing` when the agent's program could not be started at all (waiting will not help).
+ */
 export class AgentUnavailableError extends Error {
   constructor(
-    readonly kind: AgentFailureKind,
+    readonly kind: AgentFailureKind | 'missing',
     detail: string,
     retries: number,
     /** Which call it was (worker, resolver, reviewer, replanner): what the task owes for it differs. */
@@ -61,7 +64,9 @@ export class AgentUnavailableError extends Error {
     super(
       kind === 'quota'
         ? `agent unavailable: usage or credit limit reached. ${line}`
-        : `agent unavailable: still failing after ${retries} ${retries === 1 ? 'retry' : 'retries'}. ${line}`,
+        : kind === 'missing'
+          ? `agent unavailable: ${line}`
+          : `agent unavailable: still failing after ${retries} ${retries === 1 ? 'retry' : 'retries'}. ${line}`,
     );
   }
 }

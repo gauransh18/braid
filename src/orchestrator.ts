@@ -36,6 +36,19 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 /** A task used up its own token allowance. Ends that task as failed; the run carries on with the others. */
 class TaskBudgetError extends Error {}
 
+/**
+ * A call that was waiting to be retried found, on waking, that something stopped the run meanwhile (a limit, its agent
+ * out of quota). Ends the task as failed, saying what it was; like any call the provider never answered, it is no try.
+ */
+class CallStoppedError extends Error {
+  constructor(
+    reason: string,
+    readonly role: string,
+  ) {
+    super(reason);
+  }
+}
+
 /** After a rate limit or an outage: wait, try again, wait longer. About five minutes in all before giving up. */
 const RETRY_DELAYS_MS = [20_000, 40_000, 80_000, 160_000];
 
@@ -249,10 +262,18 @@ export class Orchestrator {
     return undefined;
   }
 
-  /** Why nothing new should start (for `task`, when given, and its driver), or undefined to carry on. */
+  /**
+   * Why nothing new should start (for `task`, when given, and its driver), or undefined to carry on. A task that is
+   * reviewed on another agent is as stuck as one whose worker's agent ran out of quota: it can no more finish.
+   */
   private stopReason(driver?: string, task?: ResolvedTask): string | undefined {
     if (this.opts.signal?.aborted) return 'run aborted';
-    return this.limitReached() ?? (task ? this.taskLimitReached(task) : undefined) ?? (driver ? this.halted.get(driver) : undefined);
+    return (
+      this.limitReached() ??
+      (task ? this.taskLimitReached(task) : undefined) ??
+      (driver ? this.halted.get(driver) : undefined) ??
+      (task?.review ? this.halted.get(task.reviewer.driver) : undefined)
+    );
   }
 
   /** Throws the abort the run was given, so every phase ends through the same path in runTask. */
@@ -280,8 +301,7 @@ export class Orchestrator {
         for (const [id, task] of this.tasks) {
           const s = states[id]!;
           if (s.status !== 'pending' || running.has(id)) continue;
-          // A reviewer on another agent that ran out of quota can no more finish the task than the worker's own agent.
-          const stop = this.stopReason(task.driver) ?? (task.review ? this.halted.get(task.reviewer.driver) : undefined);
+          const stop = this.stopReason(task.driver, task);
           if (stop) {
             this.setStatus(s, 'skipped', { error: stop });
             changed = true;
@@ -475,12 +495,16 @@ export class Orchestrator {
         this.setStatus(s, 'skipped', { error: 'run aborted' });
       } else if (err instanceof TaskBudgetError) {
         this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: err.message });
+      } else if (err instanceof CallStoppedError) {
+        if (err.role === 'worker' || err.role === 'resolver') s.attempts = Math.max(0, s.attempts - 1);
+        this.setStatus(s, 'failed', { endedAt: new Date().toISOString(), error: err.message });
       } else if (err instanceof AgentUnavailableError) {
         // Not the work's fault, so a worker or resolver call that never got an answer does not count as a try. The
         // reviewer and the planner only run after the work itself used its attempts.
         if (err.role === 'worker' || err.role === 'resolver') s.attempts = Math.max(0, s.attempts - 1);
         const agent = this.agentFor(task, err.role);
-        if (err.kind === 'quota' && !this.halted.has(agent)) this.halted.set(agent, err.message);
+        // Waiting does not bring back an account out of usage or a program that is not there, so nothing more starts on it.
+        if (err.kind !== 'transient' && !this.halted.has(agent)) this.halted.set(agent, err.message);
         // Say what the task itself failed on when only the planner could not be reached.
         const earlier = err.role === 'replanner' ? feedback.at(-1)?.reason.slice(0, 3000) : undefined;
         const error = earlier ? `${earlier}\n\nThe planner could not be reached to replace this task: ${err.message}` : err.message;
@@ -579,7 +603,13 @@ export class Orchestrator {
       try {
         res = await driver.run({ ...opts, signal: signals.length ? AbortSignal.any(signals) : undefined });
       } catch (err) {
-        if (!limit?.aborted || userAbort()) throw err;
+        if (!limit?.aborted || userAbort()) {
+          // The reviewer is set up apart from the worker, so its program can be missing when the worker's is not.
+          if (role === 'reviewer' && !userAbort() && (err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+            throw new AgentUnavailableError('missing', `the ${agent} agent could not be started: ${(err as Error).message}`, retry, role);
+          }
+          throw err;
+        }
         res = { ok: false, text: '', costUsd: 0 };
       }
       this.addUsage(s, res);
@@ -605,6 +635,9 @@ export class Orchestrator {
       this.store.event('agent_retry', { task: task.id, role, retry: retry + 1, of: delays.length, delayMs, reason: res.error!.trim().split('\n')[0]!.slice(0, 200) });
       await sleep(delayMs, undefined, { signal: this.opts.signal }).catch(() => undefined);
       this.checkpoint();
+      // Seconds to minutes passed: the others may have used up the run's limit or this agent's quota meanwhile.
+      const stop = this.stopReason(agent);
+      if (stop) throw new CallStoppedError(stop, role);
     }
   }
 
@@ -638,6 +671,13 @@ export class Orchestrator {
     // Not a verdict, so not a reason to send the worker back: the review itself did not fit in the time.
     if (res.timedOut) throw new Error(`The reviewer was stopped after ${task.timeoutMin} minutes without a verdict. Raise timeoutMin in the plan or on the task if reviews of this size need longer.`);
     const verdict = extractJson<{ approve?: boolean; issues?: string[] }>(res.text);
+    // A reviewer that failed without a verdict has not judged the work, so there is nothing to send the worker back
+    // with: redoing finished, verified work cannot fix a reviewer that is set up wrongly (a model it does not have, a
+    // login it lacks).
+    if (!res.ok && typeof verdict?.approve !== 'boolean') {
+      const who = `${task.reviewer.driver}${task.reviewer.model ? ` (${task.reviewer.model})` : ''}`;
+      throw new Error(`The reviewer ${who} failed without giving a verdict, so the work was not reviewed: ${res.text.trim().slice(0, 500)}`);
+    }
     const out = {
       approve: res.ok && verdict?.approve === true,
       issues: verdict?.issues?.length ? verdict.issues : [res.ok ? 'reviewer gave no parseable verdict' : `reviewer failed: ${res.text.slice(0, 500)}`],

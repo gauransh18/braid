@@ -256,12 +256,13 @@ export class RunManager {
     this.active.ac.abort();
   }
 
-  async draft(goal: string, verify: string[], requested?: string): Promise<{ plan: PlanSpec; costUsd: number }> {
+  /** `signal` stops the planner agent, e.g. when the page that asked for the draft went away. */
+  async draft(goal: string, verify: string[], requested?: string, signal?: AbortSignal): Promise<{ plan: PlanSpec; costUsd: number }> {
     if (!goal.trim()) throw new HttpError(400, 'goal is required');
     const driver = requested ?? this.effectiveDriver();
     if (this.isDisabled(driver)) throw new HttpError(400, `The ${driver} agent is switched off in Settings.`);
     try {
-      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model: this.defaults.models?.[driver] });
+      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model: this.defaults.models?.[driver], signal });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }

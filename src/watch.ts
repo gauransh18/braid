@@ -167,7 +167,19 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
   if (parts[1] === 'plan-draft' && parts.length === 2) {
     const body = await readBody(req);
     const verify = Array.isArray(body.verify) ? body.verify.map(String) : [];
-    return send(res, 200, await runs.draft(String(body.goal ?? ''), verify, typeof body.driver === 'string' ? body.driver : undefined));
+    // A planner is an agent run that nobody else can stop. When the page goes away (closed, reloaded, gave up) before
+    // the answer was sent, nobody is waiting for it. `res` closes when the connection does; `req` already closed once
+    // its body was read.
+    const gone = new AbortController();
+    res.on('close', () => {
+      if (!res.writableFinished) gone.abort();
+    });
+    try {
+      return send(res, 200, await runs.draft(String(body.goal ?? ''), verify, typeof body.driver === 'string' ? body.driver : undefined, gone.signal));
+    } catch (err) {
+      if (gone.signal.aborted) return;
+      throw err;
+    }
   }
   if (parts[1] === 'agents' && parts.length === 3) {
     const body = await readBody(req);

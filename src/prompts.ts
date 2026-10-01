@@ -97,10 +97,11 @@ export function plannerPrompt(goal: string, verify: string[]): string {
     'You are the planner for a team of coding agents working in parallel on this repository.',
     `Goal: ${goal}`,
     'Read the repository as needed, then break the goal into 1-8 tasks. Each task runs in its own git worktree, is merged after it passes verification, and must be completable independently given its deps. Prefer fewer, well-scoped tasks. Tasks that touch the same files should depend on each other rather than run in parallel.',
+    'Give every task "touches": the repo-relative paths or globs it expects to change, as narrow as you can (for example "src/auth/**", "src/api/routes.ts", "package.json"; "dir/**" for a whole directory, "**" if it could change anything). Tasks whose touches overlap are never run at the same time, so keep them disjoint where the work allows and add a dep when one task must build on another.',
     'Each prompt must be self-contained: objective, files or areas to touch, and definition of done.',
     verify.length ? `Every task will be verified with: ${verify.join(', ')}` : '',
     'Reply with ONLY a JSON object, no prose:',
-    '{"goal": string, "tasks": [{"id": "kebab-case", "title": string, "prompt": string, "deps": [task ids]}]}',
+    '{"goal": string, "tasks": [{"id": "kebab-case", "title": string, "prompt": string, "deps": [task ids], "touches": [paths or globs]}]}',
   ]
     .filter(Boolean)
     .join('\n\n');

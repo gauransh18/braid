@@ -12,8 +12,20 @@ export interface TaskSpec {
   model?: string;
   /** Shell commands that must all exit 0 in the task worktree. Overrides plan default. */
   verify?: string[];
+  /**
+   * Commands for the check on the combined tree after the merge, run in the integration worktree. Default: the plan's
+   * `verifyMerge`, then this task's `verify`. Lets a team run the full suite per task and a quick smoke on the merge.
+   */
+  verifyMerge?: string[];
   /** Run a read-only reviewer agent over the diff before merge. */
   review?: boolean;
+  /** Which agent reviews this task's diff (only when `review` is on). Fields set here win over the plan's `reviewer`. */
+  reviewer?: ReviewerSpec;
+  /**
+   * Paths or globs (`src/auth/**`, `package.json`) this task expects to change. The scheduler does not start it while a
+   * running task's `touches` could match the same path; the task waits as pending. No `touches` = never held back.
+   */
+  touches?: string[];
   /** Total attempts (first try + retries with failure feedback). */
   maxAttempts?: number;
   /** Tools the agent may use without prompting. Headless agents cannot be asked, so anything else is denied. */
@@ -23,6 +35,13 @@ export interface TaskSpec {
   timeoutMin?: number;
   /** Fresh input and output tokens this task may use across all its agent calls before it fails. 0 = no limit. Overrides `taskBudgetTokens`. */
   budgetTokens?: number;
+}
+
+/** The agent that reviews a task's diff. What it leaves out falls back to the task's own agent and model. */
+export interface ReviewerSpec {
+  driver?: string;
+  /** Model for the reviewer. Without one the reviewer uses the task's model if it is the same agent, else the agent's default. */
+  model?: string;
 }
 
 /** Run task commands (and optionally the agent) in a container. Needs Docker or Podman. */
@@ -65,9 +84,13 @@ export interface PlanSpec {
   driver?: string;
   model?: string;
   verify?: string[];
+  /** Default for tasks' `verifyMerge`: the check on the combined tree after a merge. Without it a task's own `verify` runs there. */
+  verifyMerge?: string[];
   /** Shell commands run in every fresh worktree before the agent starts (e.g. `npm ci`). */
   setup?: string[];
   review?: boolean;
+  /** Default reviewer agent for tasks with `review` on. A task's own `reviewer` fields win over it. */
+  reviewer?: ReviewerSpec;
   maxAttempts?: number;
   allowedTools?: string[];
   maxTurns?: number;

@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { conflictPrompt, extractJson, replanPrompt, reviewerPrompt, workerPrompt, type Feedback } from './prompts.js';
 import { newRunId, RunStore, stateRoot } from './store.js';
 import { addTokens, formatTokens } from './tokens.js';
+import { touchesOverlap } from './touches.js';
 import type { AgentResult, PlanSpec, RunState, TaskState, TaskStatus } from './types.js';
 
 export interface OrchestratorOptions {
@@ -72,8 +73,11 @@ export class Orchestrator {
     this.plan = structuredClone(opts.plan);
     if (opts.resume && !opts.runId) throw new Error('resume needs a runId');
     this.tasks = new Map(this.plan.tasks.map((t) => [t.id, resolveTask(opts.plan, t)]));
-    // Fail before any work starts (and before a run folder exists) if a task names an agent braid does not have.
-    for (const t of this.tasks.values()) opts.drivers.get(t.driver);
+    // Fail before any work starts (and before a run folder exists) if a task, or its reviewer, names an agent braid does not have.
+    for (const t of this.tasks.values()) {
+      opts.drivers.get(t.driver);
+      opts.drivers.get(t.reviewer.driver);
+    }
     this.runId = opts.runId ?? newRunId();
     this.git = new Git(opts.repo, opts.signal);
     this.store = new RunStore(opts.repo, this.runId);
@@ -276,7 +280,8 @@ export class Orchestrator {
         for (const [id, task] of this.tasks) {
           const s = states[id]!;
           if (s.status !== 'pending' || running.has(id)) continue;
-          const stop = this.stopReason(task.driver);
+          // A reviewer on another agent that ran out of quota can no more finish the task than the worker's own agent.
+          const stop = this.stopReason(task.driver) ?? (task.review ? this.halted.get(task.reviewer.driver) : undefined);
           if (stop) {
             this.setStatus(s, 'skipped', { error: stop });
             changed = true;
@@ -294,7 +299,7 @@ export class Orchestrator {
         const s = states[id]!;
         if (s.status !== 'pending' || running.has(id)) continue;
         const ready = task.deps.every((d) => states[d]!.status === 'done');
-        if (ready && running.size < concurrency) {
+        if (ready && running.size < concurrency && !this.overlapsRunning(task, running)) {
           running.set(id, this.runTask(task).finally(() => running.delete(id)));
         }
       }
@@ -307,6 +312,18 @@ export class Orchestrator {
       }
       await Promise.race(running.values());
     }
+  }
+
+  /**
+   * Whether a task that could start would change the same paths as one that has. Counts everything in `running`, not
+   * just tasks whose status says so: one still in worktree setup is "pending" but already owns its paths. With nothing
+   * running this is false, so overlapping tasks wait for each other but the scheduler cannot stall on them.
+   */
+  private overlapsRunning(task: ResolvedTask, running: ReadonlyMap<string, unknown>): boolean {
+    for (const id of running.keys()) {
+      if (id !== task.id && touchesOverlap(task.touches, this.tasks.get(id)?.touches ?? [])) return true;
+    }
+    return false;
   }
 
   /** Run a setup or verify command on the host, or in the sandbox container when the plan has one. */
@@ -322,8 +339,8 @@ export class Orchestrator {
     return { ok: true, output: '' };
   }
 
-  private async verify(task: ResolvedTask, cwd: string): Promise<{ ok: boolean; report: string }> {
-    for (const cmd of task.verify) {
+  private async verify(task: ResolvedTask, cwd: string, commands: string[] = task.verify): Promise<{ ok: boolean; report: string }> {
+    for (const cmd of commands) {
       const res = await this.sh(cmd, cwd, 'verify');
       // Cut short by an abort: not a verdict on the work, so it is neither logged as a check nor fed back.
       if (res.aborted) throw abortError();
@@ -459,7 +476,8 @@ export class Orchestrator {
         // Not the work's fault, so a worker or resolver call that never got an answer does not count as a try. The
         // reviewer and the planner only run after the work itself used its attempts.
         if (err.role === 'worker' || err.role === 'resolver') s.attempts = Math.max(0, s.attempts - 1);
-        if (err.kind === 'quota' && !this.halted.has(task.driver)) this.halted.set(task.driver, err.message);
+        const agent = this.agentFor(task, err.role);
+        if (err.kind === 'quota' && !this.halted.has(agent)) this.halted.set(agent, err.message);
         // Say what the task itself failed on when only the planner could not be reached.
         const earlier = err.role === 'replanner' ? feedback.at(-1)?.reason.slice(0, 3000) : undefined;
         const error = earlier ? `${earlier}\n\nThe planner could not be reached to replace this task: ${err.message}` : err.message;
@@ -544,7 +562,8 @@ export class Orchestrator {
    * (a timeout, a Stop) adds nothing.
    */
   private async callAgent(task: ResolvedTask, role: string, opts: Omit<DriverRunOptions, 'signal'>): Promise<AgentResult> {
-    const driver = this.opts.drivers.get(task.driver);
+    const agent = this.agentFor(task, role);
+    const driver = this.opts.drivers.get(agent);
     const delays = this.opts.retryDelaysMs ?? RETRY_DELAYS_MS;
     const s = this.state.tasks[task.id]!;
     const userAbort = () => this.opts.signal?.aborted === true;
@@ -578,12 +597,17 @@ export class Orchestrator {
       // The task's own allowance ran out meanwhile: say that, not that the provider is down.
       const spent = kind === 'quota' ? undefined : this.taskLimitReached(task);
       if (spent) throw new TaskBudgetError(spent);
-      if (kind === 'quota' || retry >= delays.length || this.stopReason(task.driver)) throw new AgentUnavailableError(kind, res.error!, retry, role);
+      if (kind === 'quota' || retry >= delays.length || this.stopReason(agent)) throw new AgentUnavailableError(kind, res.error!, retry, role);
       const delayMs = Math.round(delays[retry]! * (1 + Math.random() * 0.25));
       this.store.event('agent_retry', { task: task.id, role, retry: retry + 1, of: delays.length, delayMs, reason: res.error!.trim().split('\n')[0]!.slice(0, 200) });
       await sleep(delayMs, undefined, { signal: this.opts.signal }).catch(() => undefined);
       this.checkpoint();
     }
+  }
+
+  /** The agent a call of this role goes to: the reviewer can be another one than the worker. */
+  private agentFor(task: ResolvedTask, role: string): string {
+    return role === 'reviewer' ? task.reviewer.driver : task.driver;
   }
 
   private addUsage(s: TaskState, r: AgentResult): void {
@@ -601,7 +625,7 @@ export class Orchestrator {
     const res = await this.callAgent(task, 'reviewer', {
       prompt: reviewerPrompt(this.plan, task, diff),
       cwd: dir,
-      model: task.model,
+      model: task.reviewer.model,
       allowedTools: READ_ONLY_TOOLS,
       canEdit: false,
       maxTurns: 15,
@@ -642,7 +666,7 @@ export class Orchestrator {
       }
       let v: { ok: boolean; report: string };
       try {
-        v = await this.verify(task, this.integrationDir);
+        v = await this.verify(task, this.integrationDir, task.verifyMerge);
       } catch (err) {
         // A Stop cut the combined check short. The integration branch only holds verified states, so the merge goes,
         // but this is not a failed check: nothing is logged as one and nothing is fed back to the agent.

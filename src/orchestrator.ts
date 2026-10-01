@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { DriverRegistry, DriverRunOptions } from './drivers/driver.js';
 import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
+import { terminalHint } from './hints.js';
 import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
@@ -74,7 +75,7 @@ export class Orchestrator {
     // Fail before any work starts (and before a run folder exists) if a task names an agent braid does not have.
     for (const t of this.tasks.values()) opts.drivers.get(t.driver);
     this.runId = opts.runId ?? newRunId();
-    this.git = new Git(opts.repo);
+    this.git = new Git(opts.repo, opts.signal);
     this.store = new RunStore(opts.repo, this.runId);
   }
 
@@ -146,7 +147,7 @@ export class Orchestrator {
         tasks: Object.fromEntries([...this.tasks.keys()].map((id) => [id, { id, status: 'pending', attempts: 0, costUsd: 0 }])),
       };
       await this.store.savePlan(plan);
-      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base);
+      await this.git.addWorktree(this.integrationDir, this.state.integrationBranch, base, false);
       this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
     }
     this.state.pid = process.pid;
@@ -313,7 +314,7 @@ export class Orchestrator {
   private async runSetup(cwd: string): Promise<{ ok: boolean; output: string }> {
     for (const cmd of this.plan.setup ?? []) {
       const res = await this.sh(cmd, cwd, 'setup');
-      if (res.code !== 0) return { ok: false, output: `setup \`${cmd}\` ${describeExit(res)}\n${tail(res.stdout + res.stderr)}` };
+      if (res.code !== 0) return { ok: false, output: `setup \`${cmd}\` ${describeExit(res)}\n${failureTail(res.stdout + res.stderr)}` };
     }
     return { ok: true, output: '' };
   }
@@ -324,7 +325,7 @@ export class Orchestrator {
       // Cut short by an abort: not a verdict on the work, so it is neither logged as a check nor fed back.
       if (res.aborted) throw abortError();
       this.store.event('verify', { task: task.id, cmd, code: res.code, dir: cwd === this.integrationDir ? 'integration' : 'task' });
-      if (res.code !== 0) return { ok: false, report: `\`${cmd}\` ${describeExit(res)}:\n${tail(res.stdout + res.stderr)}` };
+      if (res.code !== 0) return { ok: false, report: `\`${cmd}\` ${describeExit(res)}:\n${failureTail(res.stdout + res.stderr)}` };
     }
     return { ok: true, report: '' };
   }
@@ -621,7 +622,15 @@ export class Orchestrator {
   private serialMerge(task: ResolvedTask, branch: string): Promise<{ ok: boolean; reason: string }> {
     const job = this.mergeChain.then(async () => {
       const before = await this.git.revParse('HEAD', this.integrationDir);
-      const m = await this.git.merge(this.integrationDir, branch, `braid: merge ${task.id} - ${task.title}`);
+      let m: { ok: boolean; detail: string };
+      try {
+        m = await this.git.merge(this.integrationDir, branch, `braid: merge ${task.id} - ${task.title}`);
+      } catch (err) {
+        // A Stop killed git inside the merge (a slow hook): whatever it left half-done goes, back to the last verified state.
+        await this.git.resetHard(this.integrationDir, this.state.verifiedHead ?? before);
+        if (this.opts.signal?.aborted) this.store.event('merge_aborted', { task: task.id });
+        throw err;
+      }
       this.store.event('merge', { task: task.id, ok: m.ok });
       if (!m.ok) {
         return { ok: false, reason: `Your change conflicted with work other tasks merged first.\n${tail(m.detail, 1500)}` };
@@ -683,4 +692,10 @@ function describeExit(res: ShellResult): string {
 
 function tail(text: string, n = 4000): string {
   return text.length > n ? `...${text.slice(-n)}` : text;
+}
+
+/** The end of a failed command's output, plus a hint line when it failed for want of a terminal. Matched on all of the output; the shorter tail keeps the hint clear of the 4000-character cut stored errors get. */
+function failureTail(output: string): string {
+  const hint = terminalHint(output);
+  return hint ? `${tail(output, 3000)}\n${hint}` : tail(output);
 }

@@ -147,6 +147,9 @@ export class Orchestrator {
       this.state.verifiedHead = await this.git.revParse('HEAD', this.integrationDir);
     }
     this.state.pid = process.pid;
+    // Setup can take minutes. Until this lands, state.json still shows the previous process (or the run's old end), and
+    // a resumed run looks finished to `braid clean`.
+    await this.save();
     this.tasksToRun = Object.values(this.state.tasks).filter((t) => !COMPLETE.includes(t.status)).length;
     const setup = await this.runSetup(this.integrationDir);
     // Persist before announcing: anyone who reacts to run_start by reading state.json must see this run, not a stale one.

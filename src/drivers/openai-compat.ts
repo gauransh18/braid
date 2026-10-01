@@ -59,6 +59,8 @@ export class OpenAICompatDriver implements Driver {
       { role: 'user', content: opts.prompt },
     ];
     const usage: Usage[] = [];
+    /** Tokens the endpoint already holds from the previous turn (its prompt and its reply), unknown before the first. */
+    let seen: number | undefined;
     const maxTurns = opts.maxTurns ?? 40;
     emit({ kind: 'start', model });
 
@@ -72,9 +74,18 @@ export class OpenAICompatDriver implements Driver {
       }
       const u = reply.usage;
       if (u) {
-        const cached = Number(u.prompt_tokens_details?.cached_tokens ?? 0);
-        usage.push({ model, input: Math.max(0, Number(u.prompt_tokens ?? 0) - cached), cached, output: Number(u.completion_tokens ?? 0) });
-      }
+        const prompt = Number(u.prompt_tokens ?? 0);
+        const completion = Number(u.completion_tokens ?? 0);
+        const reported = u.prompt_tokens_details?.cached_tokens;
+        // Every turn re-sends the whole conversation, and an endpoint that does not say how much of it came from cache
+        // would have us count that conversation as fresh input again each turn. So when `cached_tokens` is missing, only
+        // what is new since the previous turn counts as fresh (this turn's prompt less the last turn's prompt and
+        // reply, never below 0) and the rest as cached. An approximation: a provider that does not cache bills the
+        // whole prompt, and the template overhead and tool results of a turn are only roughly told apart.
+        const cached = typeof reported === 'number' && Number.isFinite(reported) ? reported : seen === undefined ? 0 : Math.min(prompt, seen);
+        usage.push({ model, input: Math.max(0, prompt - cached), cached, output: completion });
+        seen = prompt + completion;
+      } else seen = undefined;
       const message = reply.choices?.[0]?.message;
       if (!message) return finish(false, `${label} returned no message: ${JSON.stringify(reply).slice(0, 300)}`, usage, model);
       if (typeof message.content === 'string' && message.content.trim()) emit({ kind: 'text', text: message.content });

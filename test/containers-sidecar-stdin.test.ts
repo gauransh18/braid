@@ -57,7 +57,9 @@ function post(url: string, path: string, body: unknown): Promise<number> {
 
 /**
  * `braid watch --control` in a repo, told to listen on stdin, with a run in flight: its check (`hang.js`, which
- * ignores SIGTERM when `stubborn`) has started.
+ * ignores SIGTERM when `stubborn`) has started. The check is `exec node hang.js` so that node itself leads its process
+ * group under every /bin/sh: dash (Debian, Ubuntu) keeps a wrapper shell around a plain `node hang.js`, which dies of
+ * SIGTERM and lets the stop finish early with the stubborn node orphaned, and bash (macOS) does not.
  */
 async function sidecarWithRun(o: { stubborn?: boolean; stdinMode?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'braid-sidecar-'));
@@ -81,7 +83,7 @@ async function sidecarWithRun(o: { stubborn?: boolean; stdinMode?: boolean } = {
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
   await until(() => /braid watch: http:\/\/127\.0\.0\.1:\d+/.test(output), 'the server to listen');
   const url = /braid watch: (http:\/\/127\.0\.0\.1:\d+)/.exec(output)![1]!;
-  const plan = { goal: 'g', driver: 'mock', verify: ['node hang.js'], tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
+  const plan = { goal: 'g', driver: 'mock', verify: ['exec node hang.js'], tasks: [{ id: 'a', title: 'A', prompt: 'p' }] };
   assert.equal(await post(url, '/api/runs', { plan }), 202);
   await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim().length > 0, 'the check to start');
   const checkPid = Number(readFileSync(pidFile, 'utf8').trim().split('\n')[0]);

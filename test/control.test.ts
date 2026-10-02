@@ -201,6 +201,10 @@ describe('control endpoints', () => {
     assert.equal((await authed(server, 'POST', '/api/run/20200101-000000-zzzz/resume', {})).status, 404);
   });
 
+  it('tells the page which agent a run would use', async () => {
+    assert.equal((await authed(server, 'GET', '/api/status')).json.agent, 'mock', 'the only agent this server has');
+  });
+
   it('says which agent could not draft a plan, and why', async () => {
     script = () => ({ ok: false, text: 'the model is overloaded today' });
     const res = await authed(server, 'POST', '/api/plan-draft', { goal: 'do it', verify: ['npm test'], driver: 'mock' });

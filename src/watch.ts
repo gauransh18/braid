@@ -127,7 +127,7 @@ async function handleControl(repo: string, req: IncomingMessage, res: ServerResp
   const { runs } = control;
 
   if (parts[1] === 'status' && req.method === 'GET') {
-    return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo), defaults: runs.agentDefaults });
+    return send(res, 200, { active: runs.activeRunId, repoName: basename(repo), suggestedVerify: await detectVerify(repo), defaults: runs.agentDefaults, agent: runs.effectiveDriver() });
   }
   if (parts[1] === 'doctor' && req.method === 'GET') {
     // The CLIs braid can find, plus NVIDIA NIM, which is a hosted API: "installed" there means a key is set.

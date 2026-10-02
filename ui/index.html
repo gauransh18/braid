@@ -137,7 +137,8 @@ body.start-mode #runBanner { display: none; }
 .btn[disabled] { opacity: .5; cursor: default; }
 [hidden] { display: none !important; }
 /* The guided start has no run to show yet: keep the header to the logo and the theme toggle. */
-body.start-mode .actions > :not(#themeBtn):not(#historyBtn), body.start-mode .runbar, body.start-mode #bubble { display: none; }
+/* The header's own buttons only: the plan screen has an .actions row too, and its Start run button must stay. */
+body.start-mode header.top .actions > :not(#themeBtn):not(#historyBtn), body.start-mode .runbar, body.start-mode #bubble { display: none; }
 .composer { width: min(720px, 100%); margin: 0 auto; text-align: left; display: flex; flex-direction: column; gap: 14px; color: var(--text); }
 .composer h2 { margin: 0; font-size: 20px; }
 .composer .lede { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -1524,6 +1525,7 @@ function mountComposer(host, onStarted) {
   const step = (name) => q(`[data-step="${name}"]`);
   let plan = null;
   let defaults = {};
+  let effectiveAgent = '';
 
   const show = (name) => { step('goal').hidden = name !== 'goal'; step('review').hidden = name !== 'review'; };
   const say = (which, text, ok) => { const el = f('err-' + which); el.textContent = text || ''; el.classList.toggle('ok', !!ok); };
@@ -1535,14 +1537,24 @@ function mountComposer(host, onStarted) {
       `<div class="p">${esc2(String(t.prompt || '').slice(0, 220))}${String(t.prompt || '').length > 220 ? '...' : ''}</div>` +
       `${t.deps?.length ? `<div class="d">runs after: ${t.deps.map(esc2).join(', ')}</div>` : ''}</li>`).join('')}</ol>`;
     f('json').value = JSON.stringify(plan, null, 2);
-    const agent = plan.driver || defaults.driver || 'claude';
+    // The agent a run really uses is chosen by the server (the default in Settings, skipping any that are switched off).
+    const agent = plan.driver || effectiveAgent || defaults.driver || 'claude';
     const model = plan.model || defaults.models?.[agent];
-    f('agentLine').innerHTML = `Agent: <b style="color:var(--text)">${esc2(agent)}</b> &middot; model: <b style="color:var(--text)">${esc2(model || 'the CLI\'s default')}</b>. Change these in the Braid menu, under Settings (Cmd+,), or in the plan JSON below.`;
+    const fallback = agent === 'nim' ? 'chosen automatically' : 'the CLI\'s default';
+    f('agentLine').innerHTML = `Agent: <b style="color:var(--text)">${esc2(agent)}</b> &middot; model: <b style="color:var(--text)">${esc2(model || fallback)}</b>. Change these in the Braid menu, under Settings (Cmd+,), or in the plan JSON below.`;
   }
-  function review(p) { plan = p; renderSummary(); say('review', ''); show('review'); }
+  /** Settings can change while this page is open, so ask again which agent a run would use before showing it. */
+  async function refreshAgent() {
+    try {
+      const st = await api('GET', '/api/status');
+      defaults = st.defaults || {};
+      effectiveAgent = st.agent || '';
+    } catch { /* keep what we had */ }
+  }
+  async function review(p) { plan = p; await refreshAgent(); renderSummary(); say('review', ''); show('review'); }
 
   // Environment: suggested check command, saved plans, and whether an agent CLI exists.
-  api('GET', '/api/status').then((st) => { defaults = st.defaults || {}; if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
+  api('GET', '/api/status').then((st) => { defaults = st.defaults || {}; effectiveAgent = st.agent || ''; if (st.suggestedVerify && !f('verify').value) f('verify').placeholder = st.suggestedVerify, f('verify').value = st.suggestedVerify; }).catch(() => {});
   api('GET', '/api/plans').then((names) => { f('saved').innerHTML = '<option value="">Load a saved plan...</option>' + names.map((n) => `<option>${esc2(n)}</option>`).join(''); if (!names.length) { f('saved').hidden = true; f('saved').nextElementSibling.hidden = true; } }).catch(() => {});
   /** The agent chips are switches: click one to turn that agent off or on everywhere (saved in Settings). */
   function loadAgents() {
@@ -1579,7 +1591,7 @@ function mountComposer(host, onStarted) {
     try {
       const verify = f('verify').value.trim();
       const res = await api('POST', '/api/plan-draft', { goal, verify: verify ? [verify] : [] });
-      review(res.plan);
+      await review(res.plan);
       say('review', 'Drafted. Change anything you like before starting.', true);
     } catch (err) { say('goal', err.message); }
     finally { btn.disabled = false; btn.textContent = 'Draft a plan'; }

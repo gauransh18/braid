@@ -1,0 +1,452 @@
+<template>
+  <style>
+    @font-face { font-family: "Pixelify Sans"; font-weight: 700; src: url("assets/pixelify-sans-latin-700-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Pixelify Sans"; font-weight: 600; src: url("assets/pixelify-sans-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("assets/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 600; src: url("assets/jetbrains-mono-latin-600-normal.woff2") format("woff2"); }
+    #root { font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0; position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+    #root .clip { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+    #floor-bg { background-color: #12131c;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 2px, transparent 2px 12px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 2px, transparent 2px 12px); }
+    #floor-world { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+    .floor-sans { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
+    #floor-knot { position: absolute; left: 48px; top: 12px; width: 72px; height: 72px; image-rendering: pixelated; }
+    #floor-wordmark { position: absolute; left: 136px; top: 0; height: 96px; line-height: 96px; font-family: "Pixelify Sans", monospace; font-weight: 700; font-size: 44px; letter-spacing: -0.01em; color: #ecebf5; white-space: nowrap; }
+    #floor-bubble { opacity: 0; position: absolute; left: 300px; top: 21px; height: 54px; box-sizing: border-box; padding: 0 20px; display: flex; align-items: center;
+      background: #232638; border: 1px solid #3a3e58; border-radius: 12px; white-space: nowrap;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 19px; color: #ecebf5; }
+    #floor-bubble::before { content: ""; position: absolute; left: -7px; top: 20px; width: 12px; height: 12px; background: #232638; border-left: 1px solid #3a3e58; border-bottom: 1px solid #3a3e58; transform: rotate(45deg); }
+    #floor-hdr-right { position: absolute; right: 48px; top: 0; height: 96px; display: flex; align-items: center; gap: 44px; }
+    #floor-pill { height: 34px; box-sizing: border-box; padding: 0 18px; display: flex; align-items: center; border: 1px solid #3a3e58; border-radius: 999px;
+      font-family: "JetBrains Mono", monospace; font-size: 15px; color: #9a9cb3; letter-spacing: 0.02em; }
+    .floor-stat { display: flex; align-items: baseline; gap: 12px; }
+    .floor-stat-l { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 18px; color: #9a9cb3; }
+    .floor-stat-v { font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 30px; color: #ecebf5; letter-spacing: -0.02em; }
+
+    .floor-panel { position: absolute; box-sizing: border-box; background: #1d1f2d; border: 1px solid #2c2f44; border-radius: 14px;
+      box-shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.6); }
+    #floor-panel-floor { left: 48px; top: 120px; width: 1248px; height: 912px; }
+    #floor-panel-braid { left: 1320px; top: 120px; width: 552px; height: 912px; }
+    .floor-ptitle { position: absolute; font-family: "Pixelify Sans", monospace; font-weight: 600; font-size: 30px; line-height: 36px; color: #ecebf5; white-space: nowrap; }
+    #floor-sub { position: absolute; left: 1060px; top: 142px; font-family: "JetBrains Mono", monospace; font-size: 15px; color: #666985; white-space: nowrap; width: 212px; text-align: right; }
+    #floor-nothing { position: absolute; left: 1344px; top: 186px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 19px; color: #9a9cb3; white-space: nowrap; }
+    .floor-svg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; }
+    .floor-th { fill: none; stroke: #3a3e58; stroke-width: 3; }
+    .floor-th-live { fill: none; stroke-width: 3; stroke-dasharray: 12 9; opacity: 0; }
+    .floor-rope { fill: none; stroke: #3a3e58; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 0.1 13; }
+
+    .floor-desk { position: absolute; width: 330px; height: 150px; box-sizing: border-box; background: #232638; border: 2px solid #2c2f44; border-radius: 12px; overflow: hidden; }
+    .floor-bar { position: absolute; left: 0; top: 0; width: 8px; height: 150px; background: var(--c); }
+    .floor-id { position: absolute; left: 26px; top: 14px; font-family: "JetBrains Mono", monospace; font-size: 17px; color: #9a9cb3; letter-spacing: 0.02em; }
+    .floor-title { position: absolute; left: 26px; top: 44px; width: 190px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 20px; line-height: 26px; color: #ecebf5; white-space: nowrap; }
+    .floor-blob { position: absolute; left: 218px; top: 6px; width: 96px; height: 96px; image-rendering: pixelated; }
+    .floor-row { position: absolute; left: 26px; top: 100px; display: flex; align-items: center; gap: 10px; }
+    .floor-chip { box-sizing: border-box; height: 26px; padding: 0 10px; display: flex; align-items: center; border-radius: 5px; background: #2c2f44; color: #9a9cb3;
+      font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 14px; letter-spacing: 0.02em; transform-origin: 0% 50%; }
+    .floor-chip.running { background: rgba(108,182,255,.16); color: #6cb6ff; }
+    .floor-chip.verifying { background: rgba(245,185,66,.16); color: #f5b942; }
+    .floor-dot { width: 9px; height: 9px; border-radius: 50%; background: #3a3e58; }
+    .floor-dot.running { background: #6cb6ff; }
+    .floor-dot.verifying { background: #f5b942; }
+    .floor-cost { position: absolute; right: 16px; top: 110px; font-family: "JetBrains Mono", monospace; font-size: 19px; color: #666985; letter-spacing: -0.02em; }
+    .floor-cost.live { color: #ecebf5; }
+    .floor-wt { position: absolute; height: 24px; line-height: 24px; font-family: "JetBrains Mono", monospace; font-size: 15px; letter-spacing: 0.01em; white-space: nowrap; opacity: 0; }
+
+    .floor-pl { position: absolute; left: 0; top: 465px; width: 1920px; height: 150px; text-align: center; opacity: 0;
+      font-family: "Pixelify Sans", monospace; font-weight: 700; font-size: 130px; line-height: 150px; letter-spacing: -0.03em; color: #ecebf5; white-space: nowrap; }
+    .floor-pl em { font-style: normal; color: #b48cff; }
+  </style>
+
+  <div data-hf-id="hf-9yxe" id="root" data-composition-id="05-floor" data-start="0" data-duration="7.385" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-owgx" id="floor-bg" class="clip" data-start="0" data-duration="7.385" data-track-index="0"></div>
+    <div data-hf-id="hf-zl61" id="floor-stage" class="clip" data-start="0" data-duration="7.385" data-track-index="1">
+      <div data-hf-id="hf-y1nh" id="floor-world" data-layout-allow-overflow="">
+        <canvas data-hf-id="hf-33e4" id="floor-knot" width="24" height="24"></canvas>
+        <div data-hf-id="hf-0bep" id="floor-wordmark">braid</div>
+        <div data-hf-id="hf-ebg5" id="floor-bubble">Weaving 3 strands. 0 braided, 4 waiting.</div>
+        <div data-hf-id="hf-wnn9" id="floor-hdr-right">
+          <div data-hf-id="hf-isg1" id="floor-pill">demo run</div>
+          <div data-hf-id="hf-x6gh" class="floor-stat"><span data-hf-id="hf-8olz" class="floor-stat-l">Merged</span><span data-hf-id="hf-jgpm" class="floor-stat-v" id="floor-merged">0/7</span></div>
+          <div data-hf-id="hf-0dt1" class="floor-stat"><span data-hf-id="hf-kjr1" class="floor-stat-l">Spend</span><span data-hf-id="hf-bniy" class="floor-stat-v" id="floor-spend">$0.00</span></div>
+        </div>
+
+        <div data-hf-id="hf-yvap" class="floor-panel" id="floor-panel-floor"></div>
+        <div data-hf-id="hf-jenx" class="floor-panel" id="floor-panel-braid"></div>
+        <div data-hf-id="hf-5gkv" class="floor-ptitle" style="left:72px;top:140px">The floor</div>
+        <div data-hf-id="hf-ohbq" id="floor-sub">7 tasks, 3 waves</div>
+        <div data-hf-id="hf-b5hm" class="floor-ptitle" style="left:1344px;top:140px">The braid</div>
+        <div data-hf-id="hf-v7um" id="floor-nothing">Nothing merged yet.</div>
+
+        <svg data-hf-id="hf-zl7e" class="floor-svg" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+      <path data-hf-id="hf-v9fn" class="floor-rope" d="M1596.0 250 L1599.0 254 L1601.7 258 L1604.0 262 L1605.8 266 L1606.8 270 L1607.0 274 L1606.4 278 L1605.0 282 L1602.9 286 L1600.4 290 L1597.5 294 L1594.5 298 L1591.6 302 L1589.1 306 L1587.0 310 L1585.6 314 L1585.0 318 L1585.2 322 L1586.2 326 L1588.0 330 L1590.3 334 L1593.0 338 L1596.0 342 L1599.0 346 L1601.7 350 L1604.0 354 L1605.8 358 L1606.8 362 L1607.0 366 L1606.4 370 L1605.0 374 L1602.9 378 L1600.4 382 L1597.5 386 L1594.5 390 L1591.6 394 L1589.1 398 L1587.0 402 L1585.6 406 L1585.0 410 L1585.2 414 L1586.2 418 L1588.0 422 L1590.3 426 L1593.0 430 L1596.0 434 L1599.0 438 L1601.7 442 L1604.0 446 L1605.8 450 L1606.8 454 L1607.0 458 L1606.4 462 L1605.0 466 L1602.9 470 L1600.4 474 L1597.5 478 L1594.5 482 L1591.6 486 L1589.1 490 L1587.0 494 L1585.6 498 L1585.0 502 L1585.2 506 L1586.2 510 L1588.0 514 L1590.3 518 L1593.0 522 L1596.0 526 L1599.0 530 L1601.7 534 L1604.0 538 L1605.8 542 L1606.8 546 L1607.0 550 L1606.4 554 L1605.0 558 L1602.9 562 L1600.4 566 L1597.5 570 L1594.5 574 L1591.6 578 L1589.1 582 L1587.0 586 L1585.6 590 L1585.0 594 L1585.2 598 L1586.2 602 L1588.0 606 L1590.3 610 L1593.0 614 L1596.0 618 L1599.0 622 L1601.7 626 L1604.0 630 L1605.8 634 L1606.8 638 L1607.0 642 L1606.4 646 L1605.0 650 L1602.9 654 L1600.4 658 L1597.5 662 L1594.5 666 L1591.6 670 L1589.1 674 L1587.0 678 L1585.6 682 L1585.0 686 L1585.2 690 L1586.2 694 L1588.0 698 L1590.3 702 L1593.0 706 L1596.0 710 L1599.0 714 L1601.7 718 L1604.0 722 L1605.8 726 L1606.8 730 L1607.0 734 L1606.4 738 L1605.0 742 L1602.9 746 L1600.4 750 L1597.5 754 L1594.5 758 L1591.6 762 L1589.1 766 L1587.0 770 L1585.6 774 L1585.0 778 L1585.2 782 L1586.2 786 L1588.0 790 L1590.3 794 L1593.0 798 L1596.0 802 L1599.0 806 L1601.7 810 L1604.0 814 L1605.8 818 L1606.8 822 L1607.0 826 L1606.4 830 L1605.0 834 L1602.9 838 L1600.4 842 L1597.5 846 L1594.5 850 L1591.6 854 L1589.1 858 L1587.0 862 L1585.6 866 L1585.0 870 L1585.2 874 L1586.2 878 L1588.0 882 L1590.3 886 L1593.0 890 L1596.0 894 L1599.0 898 L1601.7 902 L1604.0 906 L1605.8 910 L1606.8 914 L1607.0 918 L1606.4 922 L1605.0 926 L1602.9 930 L1600.4 934 L1597.5 938 L1594.5 942 L1591.6 946 L1589.1 950 L1587.0 954 L1585.6 958 L1585.0 962 L1585.2 966 L1586.2 970 L1588.0 974 L1590.3 978" />
+      <path data-hf-id="hf-so55" class="floor-rope" d="M1605.5 250 L1603.7 254 L1601.3 258 L1598.5 262 L1595.5 266 L1592.6 270 L1589.9 274 L1587.6 278 L1586.0 282 L1585.1 286 L1585.1 290 L1585.8 294 L1587.3 298 L1589.5 302 L1592.1 306 L1595.0 310 L1598.0 314 L1600.8 318 L1603.3 322 L1605.3 326 L1606.5 330 L1607.0 334 L1606.7 338 L1605.5 342 L1603.7 346 L1601.3 350 L1598.5 354 L1595.5 358 L1592.6 362 L1589.9 366 L1587.6 370 L1586.0 374 L1585.1 378 L1585.1 382 L1585.8 386 L1587.3 390 L1589.5 394 L1592.1 398 L1595.0 402 L1598.0 406 L1600.8 410 L1603.3 414 L1605.3 418 L1606.5 422 L1607.0 426 L1606.7 430 L1605.5 434 L1603.7 438 L1601.3 442 L1598.5 446 L1595.5 450 L1592.6 454 L1589.9 458 L1587.6 462 L1586.0 466 L1585.1 470 L1585.1 474 L1585.8 478 L1587.3 482 L1589.5 486 L1592.1 490 L1595.0 494 L1598.0 498 L1600.8 502 L1603.3 506 L1605.3 510 L1606.5 514 L1607.0 518 L1606.7 522 L1605.5 526 L1603.7 530 L1601.3 534 L1598.5 538 L1595.5 542 L1592.6 546 L1589.9 550 L1587.6 554 L1586.0 558 L1585.1 562 L1585.1 566 L1585.8 570 L1587.3 574 L1589.5 578 L1592.1 582 L1595.0 586 L1598.0 590 L1600.8 594 L1603.3 598 L1605.3 602 L1606.5 606 L1607.0 610 L1606.7 614 L1605.5 618 L1603.7 622 L1601.3 626 L1598.5 630 L1595.5 634 L1592.6 638 L1589.9 642 L1587.6 646 L1586.0 650 L1585.1 654 L1585.1 658 L1585.8 662 L1587.3 666 L1589.5 670 L1592.1 674 L1595.0 678 L1598.0 682 L1600.8 686 L1603.3 690 L1605.3 694 L1606.5 698 L1607.0 702 L1606.7 706 L1605.5 710 L1603.7 714 L1601.3 718 L1598.5 722 L1595.5 726 L1592.6 730 L1589.9 734 L1587.6 738 L1586.0 742 L1585.1 746 L1585.1 750 L1585.8 754 L1587.3 758 L1589.5 762 L1592.1 766 L1595.0 770 L1598.0 774 L1600.8 778 L1603.3 782 L1605.3 786 L1606.5 790 L1607.0 794 L1606.7 798 L1605.5 802 L1603.7 806 L1601.3 810 L1598.5 814 L1595.5 818 L1592.6 822 L1589.9 826 L1587.6 830 L1586.0 834 L1585.1 838 L1585.1 842 L1585.8 846 L1587.3 850 L1589.5 854 L1592.1 858 L1595.0 862 L1598.0 866 L1600.8 870 L1603.3 874 L1605.3 878 L1606.5 882 L1607.0 886 L1606.7 890 L1605.5 894 L1603.7 898 L1601.3 902 L1598.5 906 L1595.5 910 L1592.6 914 L1589.9 918 L1587.6 922 L1586.0 926 L1585.1 930 L1585.1 934 L1585.8 938 L1587.3 942 L1589.5 946 L1592.1 950 L1595.0 954 L1598.0 958 L1600.8 962 L1603.3 966 L1605.3 970 L1606.5 974 L1607.0 978" />
+      <path data-hf-id="hf-aq9s" class="floor-rope" d="M1586.5 250 L1585.3 254 L1585.0 258 L1585.5 262 L1586.7 266 L1588.7 270 L1591.2 274 L1594.0 278 L1597.0 282 L1599.9 286 L1602.5 290 L1604.7 294 L1606.2 298 L1606.9 302 L1606.9 306 L1606.0 310 L1604.4 314 L1602.1 318 L1599.4 322 L1596.5 326 L1593.5 330 L1590.7 334 L1588.3 338 L1586.5 342 L1585.3 346 L1585.0 350 L1585.5 354 L1586.7 358 L1588.7 362 L1591.2 366 L1594.0 370 L1597.0 374 L1599.9 378 L1602.5 382 L1604.7 386 L1606.2 390 L1606.9 394 L1606.9 398 L1606.0 402 L1604.4 406 L1602.1 410 L1599.4 414 L1596.5 418 L1593.5 422 L1590.7 426 L1588.3 430 L1586.5 434 L1585.3 438 L1585.0 442 L1585.5 446 L1586.7 450 L1588.7 454 L1591.2 458 L1594.0 462 L1597.0 466 L1599.9 470 L1602.5 474 L1604.7 478 L1606.2 482 L1606.9 486 L1606.9 490 L1606.0 494 L1604.4 498 L1602.1 502 L1599.4 506 L1596.5 510 L1593.5 514 L1590.7 518 L1588.3 522 L1586.5 526 L1585.3 530 L1585.0 534 L1585.5 538 L1586.7 542 L1588.7 546 L1591.2 550 L1594.0 554 L1597.0 558 L1599.9 562 L1602.5 566 L1604.7 570 L1606.2 574 L1606.9 578 L1606.9 582 L1606.0 586 L1604.4 590 L1602.1 594 L1599.4 598 L1596.5 602 L1593.5 606 L1590.7 610 L1588.3 614 L1586.5 618 L1585.3 622 L1585.0 626 L1585.5 630 L1586.7 634 L1588.7 638 L1591.2 642 L1594.0 646 L1597.0 650 L1599.9 654 L1602.5 658 L1604.7 662 L1606.2 666 L1606.9 670 L1606.9 674 L1606.0 678 L1604.4 682 L1602.1 686 L1599.4 690 L1596.5 694 L1593.5 698 L1590.7 702 L1588.3 706 L1586.5 710 L1585.3 714 L1585.0 718 L1585.5 722 L1586.7 726 L1588.7 730 L1591.2 734 L1594.0 738 L1597.0 742 L1599.9 746 L1602.5 750 L1604.7 754 L1606.2 758 L1606.9 762 L1606.9 766 L1606.0 770 L1604.4 774 L1602.1 778 L1599.4 782 L1596.5 786 L1593.5 790 L1590.7 794 L1588.3 798 L1586.5 802 L1585.3 806 L1585.0 810 L1585.5 814 L1586.7 818 L1588.7 822 L1591.2 826 L1594.0 830 L1597.0 834 L1599.9 838 L1602.5 842 L1604.7 846 L1606.2 850 L1606.9 854 L1606.9 858 L1606.0 862 L1604.4 866 L1602.1 870 L1599.4 874 L1596.5 878 L1593.5 882 L1590.7 886 L1588.3 890 L1586.5 894 L1585.3 898 L1585.0 902 L1585.5 906 L1586.7 910 L1588.7 914 L1591.2 918 L1594.0 922 L1597.0 926 L1599.9 930 L1602.5 934 L1604.7 938 L1606.2 942 L1606.9 946 L1606.9 950 L1606.0 954 L1604.4 958 L1602.1 962 L1599.4 966 L1596.5 970 L1593.5 974 L1590.7 978" />
+      <path data-hf-id="hf-px86" class="floor-th" d="M426 305 C471 305 471 305 516 305" />
+      <path data-hf-id="hf-7kuc" class="floor-th" d="M426 485 C471 485 471 305 516 305" />
+      <path data-hf-id="hf-2imk" class="floor-th" d="M426 665 C471 665 471 305 516 305" />
+      <path data-hf-id="hf-jnee" class="floor-th" d="M426 305 C471 305 471 485 516 485" />
+      <path data-hf-id="hf-49ya" class="floor-th" d="M846 305 C891 305 891 305 936 305" />
+      <path data-hf-id="hf-vd2m" class="floor-th" d="M846 305 C891 305 891 485 936 485" />
+      <path data-hf-id="hf-r98y" class="floor-th-live" id="floor-thl-0" d="M426 305 C471 305 471 305 516 305" stroke="#ff7a90" />
+      <path data-hf-id="hf-9cx5" class="floor-th-live" id="floor-thl-1" d="M426 485 C471 485 471 305 516 305" stroke="#3cc8b4" />
+      <path data-hf-id="hf-re4b" class="floor-th-live" id="floor-thl-2" d="M426 665 C471 665 471 305 516 305" stroke="#f5b942" />
+      <path data-hf-id="hf-okhn" class="floor-th-live" id="floor-thl-3" d="M426 305 C471 305 471 485 516 485" stroke="#ff7a90" />
+      <path data-hf-id="hf-7th3" class="floor-th-live" id="floor-thl-4" d="M846 305 C891 305 891 305 936 305" stroke="#9b7bff" />
+      <path data-hf-id="hf-jais" class="floor-th-live" id="floor-thl-5" d="M846 305 C891 305 891 485 936 485" stroke="#9b7bff" />
+        </svg>
+
+    <div data-hf-id="hf-s1c8" class="floor-desk" id="floor-desk-0" style="left:96px;top:230px;--c:#ff7a90">
+      <div data-hf-id="hf-1fv6" class="floor-bar"></div>
+      <div data-hf-id="hf-e6kv" class="floor-id">schema</div>
+      <div data-hf-id="hf-43vr" class="floor-title">Notes schema</div>
+      <canvas data-hf-id="hf-00l5" class="floor-blob" id="floor-blob-0" width="24" height="24"></canvas>
+      <div data-hf-id="hf-1h51" class="floor-row"><div data-hf-id="hf-ax3k" class="floor-chip" id="floor-chip-0">pending</div><div data-hf-id="hf-wmot" class="floor-dot" id="floor-dot-0"></div></div>
+      <div data-hf-id="hf-9la1" class="floor-cost" id="floor-cost-0">$0.00</div>
+    </div>
+    <div data-hf-id="hf-13zv" class="floor-desk" id="floor-desk-1" style="left:96px;top:410px;--c:#3cc8b4">
+      <div data-hf-id="hf-295i" class="floor-bar"></div>
+      <div data-hf-id="hf-h1gy" class="floor-id">auth</div>
+      <div data-hf-id="hf-nhcb" class="floor-title">Auth middleware</div>
+      <canvas data-hf-id="hf-biba" class="floor-blob" id="floor-blob-1" width="24" height="24"></canvas>
+      <div data-hf-id="hf-1vtl" class="floor-row"><div data-hf-id="hf-4ncr" class="floor-chip" id="floor-chip-1">pending</div><div data-hf-id="hf-vv10" class="floor-dot" id="floor-dot-1"></div></div>
+      <div data-hf-id="hf-tqqm" class="floor-cost" id="floor-cost-1">$0.00</div>
+    </div>
+    <div data-hf-id="hf-os7u" class="floor-desk" id="floor-desk-2" style="left:96px;top:590px;--c:#f5b942">
+      <div data-hf-id="hf-2ngj" class="floor-bar"></div>
+      <div data-hf-id="hf-vzcz" class="floor-id">errors</div>
+      <div data-hf-id="hf-85fw" class="floor-title">Error handling</div>
+      <canvas data-hf-id="hf-socj" class="floor-blob" id="floor-blob-2" width="24" height="24"></canvas>
+      <div data-hf-id="hf-32qo" class="floor-row"><div data-hf-id="hf-xta2" class="floor-chip" id="floor-chip-2">pending</div><div data-hf-id="hf-4iwv" class="floor-dot" id="floor-dot-2"></div></div>
+      <div data-hf-id="hf-i9v7" class="floor-cost" id="floor-cost-2">$0.00</div>
+    </div>
+    <div data-hf-id="hf-5fnh" class="floor-desk" id="floor-desk-3" style="left:516px;top:230px;--c:#9b7bff">
+      <div data-hf-id="hf-31rk" class="floor-bar"></div>
+      <div data-hf-id="hf-jbsu" class="floor-id">routes</div>
+      <div data-hf-id="hf-9vh7" class="floor-title">CRUD routes</div>
+      <canvas data-hf-id="hf-3a0w" class="floor-blob" id="floor-blob-3" width="24" height="24"></canvas>
+      <div data-hf-id="hf-2ofn" class="floor-row"><div data-hf-id="hf-2wnh" class="floor-chip" id="floor-chip-3">pending</div><div data-hf-id="hf-0ksu" class="floor-dot" id="floor-dot-3"></div></div>
+      <div data-hf-id="hf-yuj4" class="floor-cost" id="floor-cost-3">$0.00</div>
+    </div>
+    <div data-hf-id="hf-qqkn" class="floor-desk" id="floor-desk-4" style="left:516px;top:410px;--c:#8fd14f">
+      <div data-hf-id="hf-09md" class="floor-bar"></div>
+      <div data-hf-id="hf-ch4r" class="floor-id">docs</div>
+      <div data-hf-id="hf-5614" class="floor-title">API docs</div>
+      <canvas data-hf-id="hf-fp2d" class="floor-blob" id="floor-blob-4" width="24" height="24"></canvas>
+      <div data-hf-id="hf-0owi" class="floor-row"><div data-hf-id="hf-473o" class="floor-chip" id="floor-chip-4">pending</div><div data-hf-id="hf-98op" class="floor-dot" id="floor-dot-4"></div></div>
+      <div data-hf-id="hf-cybp" class="floor-cost" id="floor-cost-4">$0.00</div>
+    </div>
+    <div data-hf-id="hf-o1cz" class="floor-desk" id="floor-desk-5" style="left:936px;top:230px;--c:#5aa9ff">
+      <div data-hf-id="hf-0nxe" class="floor-bar"></div>
+      <div data-hf-id="hf-b4m1" class="floor-id">tests</div>
+      <div data-hf-id="hf-y5rf" class="floor-title">Test suite</div>
+      <canvas data-hf-id="hf-xo5e" class="floor-blob" id="floor-blob-5" width="24" height="24"></canvas>
+      <div data-hf-id="hf-0alh" class="floor-row"><div data-hf-id="hf-17hb" class="floor-chip" id="floor-chip-5">pending</div><div data-hf-id="hf-8h0w" class="floor-dot" id="floor-dot-5"></div></div>
+      <div data-hf-id="hf-7m0a" class="floor-cost" id="floor-cost-5">$0.00</div>
+    </div>
+    <div data-hf-id="hf-7p90" class="floor-desk" id="floor-desk-6" style="left:936px;top:410px;--c:#ff9a4d">
+      <div data-hf-id="hf-128f" class="floor-bar"></div>
+      <div data-hf-id="hf-nkbs" class="floor-id">sdk</div>
+      <div data-hf-id="hf-14k4" class="floor-title">Client sdk</div>
+      <canvas data-hf-id="hf-562n" class="floor-blob" id="floor-blob-6" width="24" height="24"></canvas>
+      <div data-hf-id="hf-1hik" class="floor-row"><div data-hf-id="hf-fn1a" class="floor-chip" id="floor-chip-6">pending</div><div data-hf-id="hf-jcij" class="floor-dot" id="floor-dot-6"></div></div>
+      <div data-hf-id="hf-clfj" class="floor-cost" id="floor-cost-6">$0.00</div>
+    </div>
+    <div data-hf-id="hf-y2hz" class="floor-wt" id="floor-wt-0" style="left:106px;top:384px;color:#ff7a90">.braid/worktrees/schema</div>
+    <div data-hf-id="hf-5gbt" class="floor-wt" id="floor-wt-1" style="left:106px;top:564px;color:#3cc8b4">.braid/worktrees/auth</div>
+    <div data-hf-id="hf-hb4e" class="floor-wt" id="floor-wt-2" style="left:106px;top:744px;color:#f5b942">.braid/worktrees/errors</div>
+      </div>
+      <div data-hf-id="hf-crxr" class="floor-pl" id="floor-pl1">Each agent.</div>
+      <div data-hf-id="hf-n4vs" class="floor-pl" id="floor-pl2" data-layout-allow-overlap="">Its own <em data-hf-id="hf-9mk9" data-layout-allow-overlap="">worktree</em>.</div>
+    </div>
+  </div>
+
+  <script>
+/* braid sprites, copied from ui/index.html (drawBlob and helpers). Pure painters: call drawBlob(ctx, color, mood, f, tuft) on a 24x24 canvas. f = floor(t*8). */
+(function(){
+'use strict';
+
+/* ================= palette + sprites ================= */
+const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
+const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost', replanning: 'inspect', replaced: 'ghost' };
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mix(h, target, amt) {
+  const a = hexToRgb(h), b = target === 'black' ? [18, 16, 30] : [255, 255, 255];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amt)).join(',')})`;
+}
+function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
+
+/** A ball of wool in the task's colour, bottom-left. `roll` turns the wrapped strands so it looks like it is unwinding. */
+function drawYarnBall(px, yarn, roll) {
+  const dark = mix(yarn, 'black', .4), light = mix(yarn, 'white', .5), cx = 1.5, cy = 18.5, r = 2.7;
+  for (let y = 15; y <= 22; y++) for (let x = -2; x <= 5; x++) {
+    const d = Math.hypot(x + .5 - cx, y + .5 - cy);
+    if (d > r) continue;
+    px(x, y, d > r - 1 ? dark : ((x + y + roll) % 3 === 0 ? light : yarn));
+  }
+}
+
+/** A little knitted swatch hanging in front of the agent: rows of stitches in two tones. `f` slides the pattern while it is being worked. */
+function drawSwatch(px, yarn, y0, rows, f, x0 = 7, x1 = 12) {
+  const light = mix(yarn, 'white', .45), dark = mix(yarn, 'black', .25);
+  for (let r = 0; r < rows; r++) {
+    const from = r === rows - 1 && rows > 2 ? x0 + 1 : x0, to = r === rows - 1 && rows > 2 ? x1 - 1 : x1;
+    for (let x = from; x <= to; x++) px(x, y0 + r, (x + r + f) % 2 ? yarn : light);
+    px(from, y0 + r, dark); px(to, y0 + r, dark);
+  }
+}
+
+/**
+ * 24x24 pixel blob (20x20 body art drawn at an offset, so there is room for wool). Original art drawn procedurally:
+ * a round body, a braided tuft on top, a face, and wool props that change with mood. The wool is the task's colour,
+ * the same colour its strand has in the braid. f = animation frame.
+ */
+function drawBlob(ctx, base, mood, f, tuft) {
+  const ink = '#12131c';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(2, 2);
+  const color = mood === 'ghost' ? grey(base) : base;
+  ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
+  const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+
+  let rx = 6.5, ry = 5.5, cy = 12.5, bob = 0;
+  if (mood === 'work') bob = [0, -1, 0, 0][f % 4];
+  if (mood === 'jump') bob = [0, -2, -3, -2][f % 4];
+  if (mood === 'happy') bob = [0, -1][f % 2];
+  if (mood === 'sleep') { rx = 6.5 + (f % 8 < 4 ? .3 : 0); ry = 5.5 - (f % 8 < 4 ? .3 : 0); }
+  if (mood === 'dead') { rx = 8.2; ry = 3.2; cy = 15.5; }
+  cy += bob;
+
+  const inside = (x, y) => { const dx = (x + .5 - 10) / rx, dy = (y + .5 - cy) / ry; return dx * dx + dy * dy <= 1 && y <= 17; };
+  const edge = mix(color, 'black', .45), light = mix(color, 'white', .5);
+  let top = 20;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    if (!inside(x, y)) continue;
+    top = Math.min(top, y);
+    const border = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    px(x, y, border ? edge : color);
+  }
+  // shine
+  if (mood !== 'dead') { px(6, top + 2, light); px(7, top + 1, light); px(6, top + 1, light); }
+
+  // braided tuft: three rows zig-zagging in alternating strands
+  if (mood !== 'dead') {
+    const strands = tuft || [mix(color, 'white', .35), edge, color];
+    const sway = mood === 'work' || mood === 'jump' ? (f % 4 < 2 ? 0 : 1) : 0;
+    for (let k = 1; k <= 4; k++) {
+      const x = 9 + ((k + sway) % 2);
+      px(x, top - k, strands[k % strands.length]);
+      px(x === 9 ? 10 : 9, top - k, k === 4 ? strands[(k + 1) % strands.length] : 'transparent');
+    }
+    px(9, top - 5, strands[0]); px(11, top - 5, strands[1]); px(10, top - 5, strands[2]);
+  }
+
+  // face
+  const ey = Math.round(cy) - 1;
+  const ly = Math.round(cy) + 2; // where the hands are
+  const blink = f % 26 === 0;
+  const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  const yarn = color, yarnDark = mix(color, 'black', .35), yarnLight = mix(color, 'white', .5);
+  switch (mood) {
+    case 'sleep':
+      px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
+      { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
+        [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      // waiting: the ball of wool sits beside it, end trailing on the floor
+      drawYarnBall(px, yarn, 0);
+      [[4, 18], [5, 19], [6, 19], [7, 18]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'happy':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      // finished: a neat swatch with a fringe, and the ball tidy beside it
+      drawSwatch(px, yarn, ly, 4, 0, 6, 13);
+      [6, 8, 11, 13].forEach((x) => px(x, ly + 4, yarn));
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'dead':
+      [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      // tangled: the strand has knotted itself all over it
+      for (let x = 3; x <= 17; x++) px(x, 12 + ((x * 7) % 5), (x % 2 ? yarn : yarnDark));
+      for (let x = 4; x <= 16; x += 3) { px(x, 11 + (x % 4), yarnLight); px(x + 1, 17, yarnDark); }
+      drawYarnBall(px, yarn, 1);
+      [[4, 17], [6, 16], [8, 17], [9, 15]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'tied':
+      eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
+      // wrapped in its own wool: the strand it needs never arrived
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? yarnDark : yarn);
+      for (let x = 4; x < 16; x++) if (inside(x, Math.round(cy) + 4)) px(x, Math.round(cy) + 4, x % 2 ? yarn : yarnDark);
+      px(16, Math.round(cy) + 1, yarnDark); px(17, Math.round(cy) + 3, yarn);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'inspect': {
+      const look = f % 8 < 4 ? 1 : 0;
+      eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
+      // checking the stitches: the swatch in front, a magnifying glass over it
+      drawSwatch(px, yarn, ly, 3, 0);
+      [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
+      px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
+      px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      drawYarnBall(px, yarn, 0);
+      break;
+    }
+    case 'review':
+      eyes(7, 12, ey, blink ? 1 : 2);
+      for (let x = 5; x <= 14; x++) if (x !== 9 && x !== 10) px(x, ey - 1, ink);
+      px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
+      px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
+      px(9, ey - 1, ink); px(10, ey - 1, ink);
+      drawSwatch(px, yarn, ly + 1, 3, 0);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'work': {
+      eyes(7, 12, ey + 1, blink ? 1 : 2);
+      // knitting: the ball unwinds, the strand runs up to two clicking needles, and a swatch grows below them
+      drawYarnBall(px, yarn, f % 3);
+      [[3, 16], [4, 16 - (f % 2)], [4, 15], [5, 15]].forEach(([x, y]) => px(x, y, yarn));
+      drawSwatch(px, yarn, ly + 1, 3, f);
+      px(7 + (f % 6), ly + 1, yarnLight); // the stitch being made
+      const k = f % 4 < 2; // needles take turns, so they click
+      const needle = '#e4e1f0', tip = '#ffffff';
+      for (let i = 0; i < 5; i++) { // a shadow under each needle, so it stands out against a light body
+        px(5 + i, ly + 2 - i - (k ? 1 : 0), yarnDark);
+        px(14 - i, ly + 2 - i - (k ? 0 : 1), yarnDark);
+      }
+      for (let i = 0; i < 5; i++) {
+        px(5 + i, ly + 1 - i - (k ? 1 : 0), i === 4 ? tip : needle);
+        px(14 - i, ly + 1 - i - (k ? 0 : 1), i === 4 ? tip : needle);
+      }
+      px(5, ly + 1 - (k ? 1 : 0), yarnLight); px(14, ly + 1 - (k ? 0 : 1), yarnLight); // coloured needle ends
+      if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
+      break;
+    }
+    case 'jump':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      // tying it in: holds the strand end up towards the braid
+      for (let i = 0, y = ly - 2; y >= -2; i++, y--) px(15 + (((i + f) % 4) < 2 ? 0 : 1), y, i % 2 ? yarn : yarnLight);
+      px(14, ly - 1, yarn); px(14, ly, yarnDark);
+      drawYarnBall(px, yarn, f % 3);
+      break;
+    default:
+      eyes(7, 12, ey, blink ? 1 : 2);
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      drawYarnBall(px, yarn, 0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+window.BraidSprites = { drawBlob, TASK_COLORS, KNOT, MOOD };
+})();
+
+  </script>
+  <script>
+  (function () {
+    var DUR = 7.385, B = 0.4615, BAR = 1.846;
+    var COLORS = ["#ff7a90","#3cc8b4","#f5b942","#9b7bff","#8fd14f","#5aa9ff","#ff9a4d"];
+    var DEPS = [[0,3],[1,3],[2,3],[0,4],[3,5],[3,6]];
+    var FINAL = [14, 15, 11, 0, 0, 0, 0]; // cents each desk reaches by the end of the shot; the three sum to the 0.40 handoff
+    var WAKE = [B, B + 0.07, B + 0.14];     // wave 1 wakes on the first beat
+    var VERIFY = [3 * BAR, 3 * BAR + B, 3 * BAR + 2 * B]; // bar 13, on successive beats
+    var COST0 = B;
+    var BS = window.BraidSprites;
+    var root = document.querySelector('[data-composition-id="05-floor"]') || document;
+    function q(id) { return root.querySelector('#' + id); }
+    var tl = gsap.timeline({ paused: true });
+
+    var blobs = [], chips = [], dots = [], costs = [], lastState = [], lastDraw = [], i;
+    for (i = 0; i < 7; i++) {
+      blobs.push(q('floor-blob-' + i).getContext('2d'));
+      chips.push(q('floor-chip-' + i)); dots.push(q('floor-dot-' + i)); costs.push(q('floor-cost-' + i));
+      lastState.push(''); lastDraw.push('');
+    }
+    var knotCtx = q('floor-knot').getContext('2d'), lastKnot = '';
+    var spendEl = q('floor-spend');
+    var lives = DEPS.map(function (d, k) { return q('floor-thl-' + k); });
+    var lastCost = [], lastSpend = '';
+
+    function stateOf(k, t) {
+      if (k > 2) return 'pending';
+      if (t >= VERIFY[k]) return 'verifying';
+      if (t >= WAKE[k]) return 'running';
+      return 'pending';
+    }
+    var MOODS = { pending: 'sleep', running: 'work', verifying: 'inspect' };
+
+    function render(t) {
+      var f = Math.floor(t * 8), k, st, mood, key, total = 0;
+      var p = Math.max(0, Math.min(1, (t - COST0) / (DUR - COST0)));
+      for (k = 0; k < 7; k++) {
+        st = stateOf(k, t); mood = MOODS[st];
+        key = mood + ':' + (f + k * 3);
+        if (key !== lastDraw[k]) { BS.drawBlob(blobs[k], COLORS[k], mood, f + k * 3, null); lastDraw[k] = key; }
+        if (st !== lastState[k]) {
+          chips[k].textContent = st; chips[k].className = 'floor-chip' + (st === 'pending' ? '' : ' ' + st);
+          dots[k].className = 'floor-dot' + (st === 'pending' ? '' : ' ' + st);
+          costs[k].className = 'floor-cost' + (st === 'pending' ? '' : ' live');
+          lastState[k] = st;
+        }
+        var cents = k < 3 ? Math.round(FINAL[k] * p) : 0;
+        total += cents;
+        if (cents !== lastCost[k]) { costs[k].textContent = '$' + (cents / 100).toFixed(2); lastCost[k] = cents; }
+      }
+      var s = '$' + (total / 100).toFixed(2);
+      if (s !== lastSpend) { spendEl.textContent = s; lastSpend = s; }
+      var km = (t >= B ? 'work' : 'inspect') + ':' + f;
+      if (km !== lastKnot) { BS.drawBlob(knotCtx, BS.KNOT.color, t >= B ? 'work' : 'inspect', f, BS.KNOT.tuft); lastKnot = km; }
+      var off = String(-(t * 54));
+      for (k = 0; k < lives.length; k++) lives[k].setAttribute('stroke-dashoffset', off);
+    }
+    render(0);
+
+    // Scene 1: hold the graph one beat, then wave 1 wakes on beat 1
+    tl.fromTo('#floor-bubble', { opacity: 0, scale: 0.9, transformOrigin: '0% 50%' }, { opacity: 1, scale: 1, duration: 0.2, ease: 'power3.out', immediateRender: false }, B);
+    for (i = 0; i < 3; i++) {
+      tl.fromTo('#floor-chip-' + i, { scale: 0.8 }, { scale: 1, duration: 0.2, ease: 'back.out(1.2)', immediateRender: false }, WAKE[i]);
+    }
+    tl.set([lives[0], lives[3]], { opacity: 1 }, WAKE[0]);   // schema -> routes, schema -> docs
+    tl.set(lives[1], { opacity: 1 }, WAKE[1]);                // auth -> routes
+    tl.set(lives[2], { opacity: 1 }, WAKE[2]);                // errors -> routes
+
+    // Scene 2: worktree labels slide in on successive beats; the camera pushes toward the left column
+    for (i = 0; i < 3; i++) {
+      tl.fromTo('#floor-wt-' + i, { opacity: 0, x: -28 }, { opacity: 1, x: 0, duration: 0.28, ease: 'power3.out' }, BAR + i * B);
+    }
+    gsap.set('#floor-world', { transformOrigin: '261px 515px' });
+    tl.fromTo('#floor-world', { scale: 1, x: 0 }, { scale: 1.06, x: 60, duration: BAR - 0.05, ease: 'power2.inOut', immediateRender: false }, BAR);
+
+    // Scene 3: dim the dashboard, hard-swap the punchline on the beats
+    tl.to('#floor-world', { opacity: 0.35, duration: 0.1, ease: 'none' }, 2 * BAR);
+    tl.set('#floor-pl1', { opacity: 1 }, 2 * BAR);
+    tl.set('#floor-pl1', { opacity: 0 }, 2 * BAR + B);
+    tl.set('#floor-pl2', { opacity: 1 }, 2 * BAR + B);
+    tl.fromTo('#floor-pl1', { y: 12 }, { y: 0, duration: 0.12, ease: 'power2.out', immediateRender: false }, 2 * BAR);
+    tl.fromTo('#floor-pl2', { y: 12 }, { y: 0, duration: 0.12, ease: 'power2.out', immediateRender: false }, 2 * BAR + B);
+
+    // Scene 4: overlay clears, camera returns to 1:1, worktree labels step back, the three desks verify on successive beats
+    var S4 = 3 * BAR;
+    tl.set('#floor-pl2', { opacity: 0 }, S4);
+    tl.to('#floor-world', { opacity: 1, duration: 0.1, ease: 'none' }, S4);
+    tl.fromTo('#floor-world', { scale: 1.06, x: 60 }, { scale: 1, x: 0, duration: 0.75, ease: 'power3.inOut', immediateRender: false }, S4);
+    for (i = 0; i < 3; i++) {
+      tl.to('#floor-wt-' + i, { opacity: 0, x: -20, duration: 0.2, ease: 'power2.in' }, S4 + 0.05 + i * 0.06);
+      tl.fromTo('#floor-chip-' + i, { scale: 0.8 }, { scale: 1, duration: 0.2, ease: 'back.out(1.2)', immediateRender: false }, VERIFY[i]);
+    }
+
+    // everything derived from time (sprites, chips, costs, dash flow)
+    var proxy = { t: 0 };
+    // modifiers run on every render of the tween, including seeks where GSAP suppresses onUpdate callbacks
+    tl.to(proxy, { t: DUR, duration: DUR, ease: 'none', modifiers: { t: function (v) { render(v); return v; } } }, 0);
+
+    window.__timelines = window.__timelines || {};
+    window.__timelines['05-floor'] = tl;
+  })();
+  </script>
+</template>

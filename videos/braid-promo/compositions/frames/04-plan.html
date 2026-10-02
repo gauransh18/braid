@@ -1,0 +1,451 @@
+<template>
+  <style>
+    @font-face { font-family: "Pixelify Sans"; font-weight: 700; src: url("assets/pixelify-sans-latin-700-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Pixelify Sans"; font-weight: 600; src: url("assets/pixelify-sans-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("assets/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 600; src: url("assets/jetbrains-mono-latin-600-normal.woff2") format("woff2"); }
+    #root { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; color: #ecebf5; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #root * { box-sizing: border-box; }
+    #p04-bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background-color: #12131c;
+      background-image: repeating-linear-gradient(0deg, transparent 0 10px, rgba(255,255,255,.025) 10px 12px), repeating-linear-gradient(90deg, transparent 0 10px, rgba(255,255,255,.025) 10px 12px); }
+    .p04-mono { font-family: "JetBrains Mono", monospace; }
+    /* header */
+    #p04-header { position: absolute; left: 0; top: 0; width: 1920px; height: 96px; border-bottom: 1px solid #2c2f44; }
+    #p04-knot { position: absolute; left: 48px; top: 12px; width: 72px; height: 72px; image-rendering: pixelated; }
+    #p04-word { position: absolute; left: 136px; top: 0; height: 96px; line-height: 96px; font-family: "Pixelify Sans", sans-serif; font-weight: 700; font-size: 44px; color: #ecebf5; }
+    #p04-pill { position: absolute; left: 1000px; top: 28px; height: 40px; padding: 0 18px; line-height: 38px; border: 1px solid #3a3e58; border-radius: 999px; background: #1d1f2d; color: #9a9cb3; font-size: 20px; }
+    #p04-stats { position: absolute; right: 48px; top: 0; height: 96px; display: flex; align-items: center; gap: 48px; }
+    .p04-stat { font-size: 20px; color: #9a9cb3; }
+    .p04-stat b { font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 26px; color: #ecebf5; margin-left: 10px; }
+    #p04-bubble { position: absolute; left: 292px; top: 20px; height: 56px; padding: 0 22px; line-height: 52px; border: 2px solid #3a3e58; border-radius: 14px; background: #1d1f2d; color: #ecebf5; font-size: 26px; white-space: nowrap; transform-origin: 0 50%; }
+    #p04-bubble::before { content: ""; position: absolute; left: -9px; top: 18px; width: 14px; height: 14px; background: #1d1f2d; border-left: 2px solid #3a3e58; border-bottom: 2px solid #3a3e58; transform: rotate(45deg); }
+    /* panels */
+    .p04-panel { position: absolute; background: #1d1f2d; border: 1px solid #2c2f44; border-radius: 14px; box-shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.6); }
+    #p04-floor { left: 48px; top: 120px; width: 1248px; height: 912px; }
+    #p04-braid { left: 1320px; top: 120px; width: 552px; height: 912px; }
+    .p04-ptitle { position: absolute; left: 28px; top: 0; height: 72px; line-height: 72px; font-family: "Pixelify Sans", sans-serif; font-weight: 600; font-size: 32px; color: #ecebf5; }
+    .p04-pline { position: absolute; left: 0; top: 72px; width: 100%; height: 1px; background: #2c2f44; }
+    #p04-plan-file { position: absolute; right: 28px; top: 0; height: 72px; line-height: 72px; font-size: 17px; color: #9a9cb3; }
+    #p04-merged-none { position: absolute; left: 28px; top: 92px; font-size: 24px; color: #9a9cb3; }
+    #p04-rope { position: absolute; left: 0; top: 0; width: 552px; height: 912px; }
+    /* terminal sheet */
+    #p04-sheet { position: absolute; left: 0; top: 0; width: 1248px; height: 912px; background: #171926; border: 1px solid #2c2f44; border-radius: 14px; overflow: hidden; }
+    #p04-term { position: absolute; left: 0; top: 0; width: 1248px; height: 912px; }
+    #p04-termbar { position: absolute; left: 0; top: 0; width: 100%; height: 56px; border-bottom: 1px solid #2c2f44; line-height: 56px; padding-left: 32px; font-size: 17px; color: #9a9cb3; }
+    #p04-termbody { position: absolute; left: 40px; top: 84px; width: 1168px; font-family: "JetBrains Mono", monospace; font-size: 30px; line-height: 46px; color: #ecebf5; }
+    .p04-l { min-height: 46px; white-space: pre-wrap; }
+    .p04-o { color: #9a9cb3; visibility: hidden; }
+    .p04-caret { display: inline-block; width: 17px; height: 32px; margin-left: 3px; vertical-align: -5px; background: #b48cff; }
+    /* desks */
+    #p04-threads { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+    .p04-thread { fill: none; stroke-width: 3; stroke-linecap: butt; stroke-dasharray: 1 1; stroke-dashoffset: 1; }
+    .p04-desk { position: absolute; width: 330px; height: 150px; background: #232638; border: 2px solid #2c2f44; border-radius: 12px; overflow: hidden; }
+    .p04-bar { position: absolute; left: 0; top: 0; width: 8px; height: 100%; background: var(--tc); }
+    .p04-blob { position: absolute; left: 22px; top: 25px; width: 96px; height: 96px; image-rendering: pixelated; }
+    .p04-txt { position: absolute; left: 128px; top: 0; width: 190px; height: 146px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+    .p04-id { font-family: "JetBrains Mono", monospace; font-size: 15px; color: #9a9cb3; line-height: 20px; }
+    .p04-title { font-size: 22px; font-weight: 600; color: #ecebf5; line-height: 28px; white-space: nowrap; }
+    .p04-cap { font-size: 15px; color: #9a9cb3; line-height: 20px; white-space: nowrap; }
+    .p04-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .p04-chip { font-size: 14px; font-weight: 600; line-height: 22px; padding: 0 9px; border-radius: 5px; background: #2c2f44; color: #9a9cb3; }
+    .p04-dots { display: inline-flex; gap: 3px; }
+    .p04-dots i { width: 8px; height: 8px; border-radius: 2px; background: #3a3e58; }
+    .p04-cost { margin-left: auto; font-family: "JetBrains Mono", monospace; font-size: 15px; color: #9a9cb3; }
+  </style>
+
+  <div data-hf-id="hf-lua4" id="root" data-composition-id="04-plan" data-start="0" data-duration="5.538" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-gl0j" id="p04-bg" class="clip" data-start="0" data-duration="5.538" data-track-index="0"></div>
+
+    <div data-hf-id="hf-m1dn" id="p04-header">
+      <canvas data-hf-id="hf-6ri2" id="p04-knot" width="24" height="24"></canvas>
+      <div data-hf-id="hf-0j0u" id="p04-word">braid</div>
+      <div data-hf-id="hf-r887" id="p04-bubble">Weaving a plan...</div>
+      <div data-hf-id="hf-tvsj" id="p04-pill">demo run</div>
+      <div data-hf-id="hf-nrm5" id="p04-stats">
+        <div data-hf-id="hf-8ulj" class="p04-stat">Merged<b data-hf-id="hf-8r3p">0/7</b></div>
+        <div data-hf-id="hf-imh9" class="p04-stat">Spend<b data-hf-id="hf-hom5">$0.00</b></div>
+      </div>
+    </div>
+
+    <div data-hf-id="hf-aql8" id="p04-braid" class="p04-panel">
+      <div data-hf-id="hf-c278" class="p04-ptitle">The braid</div>
+      <div data-hf-id="hf-ddyh" class="p04-pline"></div>
+      <div data-hf-id="hf-ifos" id="p04-merged-none">Nothing merged yet.</div>
+      <svg data-hf-id="hf-scpy" id="p04-rope" viewBox="0 0 552 912">
+        <path data-hf-id="hf-01o0" d="M268.2 150 L267.5 154 L266.8 158 L266.2 162 L265.7 166 L265.4 170 L265.1 174 L265.0 178 L265.0 182 L265.1 186 L265.4 190 L265.7 194 L266.2 198 L266.8 202 L267.5 206 L268.2 210 L269.1 214 L270.0 218 L271.0 222 L272.1 226 L273.2 230 L274.3 234 L275.4 238 L276.6 242 L277.7 246 L278.8 250 L279.9 254 L281.0 258 L282.0 262 L282.9 266 L283.8 270 L284.5 274 L285.2 278 L285.8 282 L286.3 286 L286.6 290 L286.9 294 L287.0 298 L287.0 302 L286.9 306 L286.6 310 L286.3 314 L285.8 318 L285.2 322 L284.5 326 L283.8 330 L282.9 334 L282.0 338 L281.0 342 L279.9 346 L278.8 350 L277.7 354 L276.6 358 L275.4 362 L274.3 366 L273.2 370 L272.1 374 L271.0 378 L270.0 382 L269.1 386 L268.2 390 L267.5 394 L266.8 398 L266.2 402 L265.7 406 L265.4 410 L265.1 414 L265.0 418 L265.0 422 L265.1 426 L265.4 430 L265.7 434 L266.2 438 L266.8 442 L267.5 446 L268.2 450 L269.1 454 L270.0 458 L271.0 462 L272.1 466 L273.2 470 L274.3 474 L275.4 478 L276.6 482 L277.7 486 L278.8 490 L279.9 494 L281.0 498 L282.0 502 L282.9 506 L283.8 510 L284.5 514 L285.2 518 L285.8 522 L286.3 526 L286.6 530 L286.9 534 L287.0 538 L287.0 542 L286.9 546 L286.6 550 L286.3 554 L285.8 558 L285.2 562 L284.5 566 L283.8 570 L282.9 574 L282.0 578 L281.0 582 L279.9 586 L278.8 590 L277.7 594 L276.6 598 L275.4 602 L274.3 606 L273.2 610 L272.1 614 L271.0 618 L270.0 622 L269.1 626 L268.2 630 L267.5 634 L266.8 638 L266.2 642 L265.7 646 L265.4 650 L265.1 654 L265.0 658 L265.0 662 L265.1 666 L265.4 670 L265.7 674 L266.2 678 L266.8 682 L267.5 686 L268.2 690 L269.1 694 L270.0 698 L271.0 702 L272.1 706 L273.2 710 L274.3 714 L275.4 718 L276.6 722 L277.7 726 L278.8 730 L279.9 734 L281.0 738 L282.0 742 L282.9 746 L283.8 750 L284.5 754 L285.2 758 L285.8 762 L286.3 766 L286.6 770 L286.9 774 L287.0 778 L287.0 782 L286.9 786 L286.6 790 L286.3 794 L285.8 798 L285.2 802 L284.5 806 L283.8 810 L282.9 814 L282.0 818 L281.0 822 L279.9 826 L278.8 830 L277.7 834 L276.6 838 L275.4 842 L274.3 846 L273.2 850 L272.1 854 L271.0 858" fill="none" stroke="#3a3e58" stroke-width="5" stroke-linecap="round" stroke-dasharray="14 11" />
+        <path data-hf-id="hf-41tf" d="M273.2 150 L274.3 154 L275.4 158 L276.6 162 L277.7 166 L278.8 170 L279.9 174 L281.0 178 L282.0 182 L282.9 186 L283.8 190 L284.5 194 L285.2 198 L285.8 202 L286.3 206 L286.6 210 L286.9 214 L287.0 218 L287.0 222 L286.9 226 L286.6 230 L286.3 234 L285.8 238 L285.2 242 L284.5 246 L283.8 250 L282.9 254 L282.0 258 L281.0 262 L279.9 266 L278.8 270 L277.7 274 L276.6 278 L275.4 282 L274.3 286 L273.2 290 L272.1 294 L271.0 298 L270.0 302 L269.1 306 L268.2 310 L267.5 314 L266.8 318 L266.2 322 L265.7 326 L265.4 330 L265.1 334 L265.0 338 L265.0 342 L265.1 346 L265.4 350 L265.7 354 L266.2 358 L266.8 362 L267.5 366 L268.2 370 L269.1 374 L270.0 378 L271.0 382 L272.1 386 L273.2 390 L274.3 394 L275.4 398 L276.6 402 L277.7 406 L278.8 410 L279.9 414 L281.0 418 L282.0 422 L282.9 426 L283.8 430 L284.5 434 L285.2 438 L285.8 442 L286.3 446 L286.6 450 L286.9 454 L287.0 458 L287.0 462 L286.9 466 L286.6 470 L286.3 474 L285.8 478 L285.2 482 L284.5 486 L283.8 490 L282.9 494 L282.0 498 L281.0 502 L279.9 506 L278.8 510 L277.7 514 L276.6 518 L275.4 522 L274.3 526 L273.2 530 L272.1 534 L271.0 538 L270.0 542 L269.1 546 L268.2 550 L267.5 554 L266.8 558 L266.2 562 L265.7 566 L265.4 570 L265.1 574 L265.0 578 L265.0 582 L265.1 586 L265.4 590 L265.7 594 L266.2 598 L266.8 602 L267.5 606 L268.2 610 L269.1 614 L270.0 618 L271.0 622 L272.1 626 L273.2 630 L274.3 634 L275.4 638 L276.6 642 L277.7 646 L278.8 650 L279.9 654 L281.0 658 L282.0 662 L282.9 666 L283.8 670 L284.5 674 L285.2 678 L285.8 682 L286.3 686 L286.6 690 L286.9 694 L287.0 698 L287.0 702 L286.9 706 L286.6 710 L286.3 714 L285.8 718 L285.2 722 L284.5 726 L283.8 730 L282.9 734 L282.0 738 L281.0 742 L279.9 746 L278.8 750 L277.7 754 L276.6 758 L275.4 762 L274.3 766 L273.2 770 L272.1 774 L271.0 778 L270.0 782 L269.1 786 L268.2 790 L267.5 794 L266.8 798 L266.2 802 L265.7 806 L265.4 810 L265.1 814 L265.0 818 L265.0 822 L265.1 826 L265.4 830 L265.7 834 L266.2 838 L266.8 842 L267.5 846 L268.2 850 L269.1 854 L270.0 858" fill="none" stroke="#3a3e58" stroke-width="5" stroke-linecap="round" stroke-dasharray="14 11" />
+        <path data-hf-id="hf-hvpr" d="M286.6 150 L286.3 154 L285.8 158 L285.2 162 L284.5 166 L283.8 170 L282.9 174 L282.0 178 L281.0 182 L279.9 186 L278.8 190 L277.7 194 L276.6 198 L275.4 202 L274.3 206 L273.2 210 L272.1 214 L271.0 218 L270.0 222 L269.1 226 L268.2 230 L267.5 234 L266.8 238 L266.2 242 L265.7 246 L265.4 250 L265.1 254 L265.0 258 L265.0 262 L265.1 266 L265.4 270 L265.7 274 L266.2 278 L266.8 282 L267.5 286 L268.2 290 L269.1 294 L270.0 298 L271.0 302 L272.1 306 L273.2 310 L274.3 314 L275.4 318 L276.6 322 L277.7 326 L278.8 330 L279.9 334 L281.0 338 L282.0 342 L282.9 346 L283.8 350 L284.5 354 L285.2 358 L285.8 362 L286.3 366 L286.6 370 L286.9 374 L287.0 378 L287.0 382 L286.9 386 L286.6 390 L286.3 394 L285.8 398 L285.2 402 L284.5 406 L283.8 410 L282.9 414 L282.0 418 L281.0 422 L279.9 426 L278.8 430 L277.7 434 L276.6 438 L275.4 442 L274.3 446 L273.2 450 L272.1 454 L271.0 458 L270.0 462 L269.1 466 L268.2 470 L267.5 474 L266.8 478 L266.2 482 L265.7 486 L265.4 490 L265.1 494 L265.0 498 L265.0 502 L265.1 506 L265.4 510 L265.7 514 L266.2 518 L266.8 522 L267.5 526 L268.2 530 L269.1 534 L270.0 538 L271.0 542 L272.1 546 L273.2 550 L274.3 554 L275.4 558 L276.6 562 L277.7 566 L278.8 570 L279.9 574 L281.0 578 L282.0 582 L282.9 586 L283.8 590 L284.5 594 L285.2 598 L285.8 602 L286.3 606 L286.6 610 L286.9 614 L287.0 618 L287.0 622 L286.9 626 L286.6 630 L286.3 634 L285.8 638 L285.2 642 L284.5 646 L283.8 650 L282.9 654 L282.0 658 L281.0 662 L279.9 666 L278.8 670 L277.7 674 L276.6 678 L275.4 682 L274.3 686 L273.2 690 L272.1 694 L271.0 698 L270.0 702 L269.1 706 L268.2 710 L267.5 714 L266.8 718 L266.2 722 L265.7 726 L265.4 730 L265.1 734 L265.0 738 L265.0 742 L265.1 746 L265.4 750 L265.7 754 L266.2 758 L266.8 762 L267.5 766 L268.2 770 L269.1 774 L270.0 778 L271.0 782 L272.1 786 L273.2 790 L274.3 794 L275.4 798 L276.6 802 L277.7 806 L278.8 810 L279.9 814 L281.0 818 L282.0 822 L282.9 826 L283.8 830 L284.5 834 L285.2 838 L285.8 842 L286.3 846 L286.6 850 L286.9 854 L287.0 858" fill="none" stroke="#3a3e58" stroke-width="5" stroke-linecap="round" stroke-dasharray="14 11" />
+        
+      </svg>
+    </div>
+
+    <div data-hf-id="hf-avvs" id="p04-floor" class="p04-panel">
+      <div data-hf-id="hf-pnrh" id="p04-ftitle" class="p04-ptitle">The floor</div>
+      <div data-hf-id="hf-i5li" id="p04-fline" class="p04-pline"></div>
+      <div data-hf-id="hf-vi8z" id="p04-plan-file" class="p04-mono">plans/notes.json</div>
+      <div data-hf-id="hf-ihtp" id="p04-sheet">
+        <div data-hf-id="hf-y2ze" id="p04-term">
+          <div data-hf-id="hf-4vv0" id="p04-termbar" class="p04-mono">terminal</div>
+          <div data-hf-id="hf-ssha" id="p04-termbody">
+            <div data-hf-id="hf-94z3" class="p04-l"><span data-hf-id="hf-2i79" style="color:#9a9cb3">$ </span><span data-hf-id="hf-5r8h" id="p04-cmd"></span><span data-hf-id="hf-903k" id="p04-caret1" class="p04-caret"></span></div>
+            <div data-hf-id="hf-0hqv" id="p04-o1" class="p04-l p04-o">planning with claude...</div>
+            <div data-hf-id="hf-t42p" id="p04-o2" class="p04-l p04-o">7 tasks, 3 waves</div>
+            <div data-hf-id="hf-kxui" id="p04-o3" class="p04-l p04-o" style="color:#3fcf8e">plan written to plans/notes.json</div>
+            <div data-hf-id="hf-f22y" id="p04-pr2" class="p04-l p04-o" style="color:#ecebf5"><span data-hf-id="hf-ze9l" style="color:#9a9cb3">$ </span><span data-hf-id="hf-hnzf" id="p04-caret2" class="p04-caret"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <svg data-hf-id="hf-601w" id="p04-threads" viewBox="0 0 1920 1080">
+      <path data-hf-id="hf-8u93" class="p04-thread" data-wave="2" d="M426 290 C471 290 471 275 516 275" stroke="#ff7a90" pathLength="1" />
+      <path data-hf-id="hf-u05t" class="p04-thread" data-wave="2" d="M426 485 C471 485 471 305 516 305" stroke="#3cc8b4" pathLength="1" />
+      <path data-hf-id="hf-bj4a" class="p04-thread" data-wave="2" d="M426 665 C471 665 471 335 516 335" stroke="#f5b942" pathLength="1" />
+      <path data-hf-id="hf-gwmr" class="p04-thread" data-wave="2" d="M426 320 C471 320 471 485 516 485" stroke="#ff7a90" pathLength="1" />
+      <path data-hf-id="hf-d6en" class="p04-thread" data-wave="3" d="M846 290 C891 290 891 305 936 305" stroke="#9b7bff" pathLength="1" />
+      <path data-hf-id="hf-p06f" class="p04-thread" data-wave="3" d="M846 320 C891 320 891 485 936 485" stroke="#9b7bff" pathLength="1" />
+      
+    </svg>
+    <div data-hf-id="hf-y706" id="p04-desks">
+      <div data-hf-id="hf-p2e2" class="p04-desk" data-wave="1" data-i="0" style="left:96px;top:230px;--tc:#ff7a90">
+        <i data-hf-id="hf-1d80" class="p04-bar"></i>
+        <canvas data-hf-id="hf-yd1o" class="p04-blob" width="24" height="24" data-color="#ff7a90" data-i="0"></canvas>
+        <div data-hf-id="hf-ykyr" class="p04-txt">
+          <div data-hf-id="hf-u5g5" class="p04-id">schema</div>
+          <div data-hf-id="hf-u9sl" class="p04-title">Notes schema</div>
+          <div data-hf-id="hf-92jf" class="p04-cap">ready to start</div>
+          <div data-hf-id="hf-awo3" class="p04-row"><span data-hf-id="hf-0h59" class="p04-chip">pending</span><span data-hf-id="hf-0kiw" class="p04-dots"><i data-hf-id="hf-wt6k"></i><i data-hf-id="hf-zeb8"></i><i data-hf-id="hf-y7e5"></i></span><span data-hf-id="hf-ca6j" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-5bk3" class="p04-desk" data-wave="1" data-i="1" style="left:96px;top:410px;--tc:#3cc8b4">
+        <i data-hf-id="hf-6zgo" class="p04-bar"></i>
+        <canvas data-hf-id="hf-ldhl" class="p04-blob" width="24" height="24" data-color="#3cc8b4" data-i="1"></canvas>
+        <div data-hf-id="hf-qa3n" class="p04-txt">
+          <div data-hf-id="hf-lppc" class="p04-id">auth</div>
+          <div data-hf-id="hf-hay1" class="p04-title">Auth middleware</div>
+          <div data-hf-id="hf-ryhn" class="p04-cap">ready to start</div>
+          <div data-hf-id="hf-75cz" class="p04-row"><span data-hf-id="hf-jx1d" class="p04-chip">pending</span><span data-hf-id="hf-fdgg" class="p04-dots"><i data-hf-id="hf-ylp6"></i><i data-hf-id="hf-0l8b"></i><i data-hf-id="hf-0zjc"></i></span><span data-hf-id="hf-xm97" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-4y92" class="p04-desk" data-wave="1" data-i="2" style="left:96px;top:590px;--tc:#f5b942">
+        <i data-hf-id="hf-5sjl" class="p04-bar"></i>
+        <canvas data-hf-id="hf-9wez" class="p04-blob" width="24" height="24" data-color="#f5b942" data-i="2"></canvas>
+        <div data-hf-id="hf-pvsm" class="p04-txt">
+          <div data-hf-id="hf-yqwd" class="p04-id">errors</div>
+          <div data-hf-id="hf-yw4y" class="p04-title">Error handling</div>
+          <div data-hf-id="hf-rk6m" class="p04-cap">ready to start</div>
+          <div data-hf-id="hf-6r1y" class="p04-row"><span data-hf-id="hf-l3yg" class="p04-chip">pending</span><span data-hf-id="hf-e6jd" class="p04-dots"><i data-hf-id="hf-zsm9"></i><i data-hf-id="hf-06xa"></i><i data-hf-id="hf-26gf"></i></span><span data-hf-id="hf-x7y6" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-is1c" class="p04-desk" data-wave="2" data-i="3" style="left:516px;top:230px;--tc:#9b7bff">
+        <i data-hf-id="hf-66um" class="p04-bar"></i>
+        <canvas data-hf-id="hf-mqt8" class="p04-blob" width="24" height="24" data-color="#9b7bff" data-i="3"></canvas>
+        <div data-hf-id="hf-phhl" class="p04-txt">
+          <div data-hf-id="hf-zj6w" class="p04-id">routes</div>
+          <div data-hf-id="hf-znjc" class="p04-title">Notes routes</div>
+          <div data-hf-id="hf-43gn" class="p04-cap">waits for 3 tasks</div>
+          <div data-hf-id="hf-6cqx" class="p04-row"><span data-hf-id="hf-kpnf" class="p04-chip">pending</span><span data-hf-id="hf-ekue" class="p04-dots"><i data-hf-id="hf-2krg"></i><i data-hf-id="hf-oz7w"></i><i data-hf-id="hf-okwv"></i></span><span data-hf-id="hf-wtn5" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-nd0c" class="p04-desk" data-wave="2" data-i="4" style="left:516px;top:410px;--tc:#8fd14f">
+        <i data-hf-id="hf-4zxj" class="p04-bar"></i>
+        <canvas data-hf-id="hf-8qd6" class="p04-blob" width="24" height="24" data-color="#8fd14f" data-i="4"></canvas>
+        <div data-hf-id="hf-p36k" class="p04-txt">
+          <div data-hf-id="hf-l9t1" class="p04-id">docs</div>
+          <div data-hf-id="hf-34pq" class="p04-title">API docs</div>
+          <div data-hf-id="hf-d0gn" class="p04-cap">waits for schema</div>
+          <div data-hf-id="hf-5yfw" class="p04-row"><span data-hf-id="hf-iq4a" class="p04-chip">pending</span><span data-hf-id="hf-ddxb" class="p04-dots"><i data-hf-id="hf-o6lu"></i><i data-hf-id="hf-jqbp"></i><i data-hf-id="hf-qkg0"></i></span><span data-hf-id="hf-wfc4" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-cnyz" class="p04-desk" data-wave="3" data-i="5" style="left:936px;top:230px;--tc:#5aa9ff">
+        <i data-hf-id="hf-5e8k" class="p04-bar"></i>
+        <canvas data-hf-id="hf-dywk" class="p04-blob" width="24" height="24" data-color="#5aa9ff" data-i="5"></canvas>
+        <div data-hf-id="hf-oovj" class="p04-txt">
+          <div data-hf-id="hf-z28r" class="p04-id">tests</div>
+          <div data-hf-id="hf-snrh" class="p04-title">Test suite</div>
+          <div data-hf-id="hf-3oty" class="p04-cap">waits for routes</div>
+          <div data-hf-id="hf-5k4v" class="p04-row"><span data-hf-id="hf-ibt9" class="p04-chip">pending</span><span data-hf-id="hf-ds8c" class="p04-dots"><i data-hf-id="hf-q64z"></i><i data-hf-id="hf-prty"></i><i data-hf-id="hf-pdix"></i></span><span data-hf-id="hf-w113" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-wwxu" class="p04-desk" data-wave="3" data-i="6" style="left:936px;top:410px;--tc:#ff9a4d">
+        <i data-hf-id="hf-47bh" class="p04-bar"></i>
+        <canvas data-hf-id="hf-6x7b" class="p04-blob" width="24" height="24" data-color="#ff9a4d" data-i="6"></canvas>
+        <div data-hf-id="hf-oaki" class="p04-txt">
+          <div data-hf-id="hf-o12q" class="p04-id">sdk</div>
+          <div data-hf-id="hf-ukxi" class="p04-title">Client sdk</div>
+          <div data-hf-id="hf-tqe2" class="p04-cap">waits for routes</div>
+          <div data-hf-id="hf-55tu" class="p04-row"><span data-hf-id="hf-jiqc" class="p04-chip">pending</span><span data-hf-id="hf-clb9" class="p04-dots"><i data-hf-id="hf-hqsk"></i><i data-hf-id="hf-hchj"></i><i data-hf-id="hf-8d0n"></i></span><span data-hf-id="hf-vmq2" class="p04-cost">$0.00</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+/* braid sprites, copied from ui/index.html (drawBlob and helpers). Pure painters: call drawBlob(ctx, color, mood, f, tuft) on a 24x24 canvas. f = floor(t*8). */
+(function(){
+'use strict';
+
+/* ================= palette + sprites ================= */
+const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
+const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost', replanning: 'inspect', replaced: 'ghost' };
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mix(h, target, amt) {
+  const a = hexToRgb(h), b = target === 'black' ? [18, 16, 30] : [255, 255, 255];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amt)).join(',')})`;
+}
+function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
+
+/** A ball of wool in the task's colour, bottom-left. `roll` turns the wrapped strands so it looks like it is unwinding. */
+function drawYarnBall(px, yarn, roll) {
+  const dark = mix(yarn, 'black', .4), light = mix(yarn, 'white', .5), cx = 1.5, cy = 18.5, r = 2.7;
+  for (let y = 15; y <= 22; y++) for (let x = -2; x <= 5; x++) {
+    const d = Math.hypot(x + .5 - cx, y + .5 - cy);
+    if (d > r) continue;
+    px(x, y, d > r - 1 ? dark : ((x + y + roll) % 3 === 0 ? light : yarn));
+  }
+}
+
+/** A little knitted swatch hanging in front of the agent: rows of stitches in two tones. `f` slides the pattern while it is being worked. */
+function drawSwatch(px, yarn, y0, rows, f, x0 = 7, x1 = 12) {
+  const light = mix(yarn, 'white', .45), dark = mix(yarn, 'black', .25);
+  for (let r = 0; r < rows; r++) {
+    const from = r === rows - 1 && rows > 2 ? x0 + 1 : x0, to = r === rows - 1 && rows > 2 ? x1 - 1 : x1;
+    for (let x = from; x <= to; x++) px(x, y0 + r, (x + r + f) % 2 ? yarn : light);
+    px(from, y0 + r, dark); px(to, y0 + r, dark);
+  }
+}
+
+/**
+ * 24x24 pixel blob (20x20 body art drawn at an offset, so there is room for wool). Original art drawn procedurally:
+ * a round body, a braided tuft on top, a face, and wool props that change with mood. The wool is the task's colour,
+ * the same colour its strand has in the braid. f = animation frame.
+ */
+function drawBlob(ctx, base, mood, f, tuft) {
+  const ink = '#12131c';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(2, 2);
+  const color = mood === 'ghost' ? grey(base) : base;
+  ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
+  const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+
+  let rx = 6.5, ry = 5.5, cy = 12.5, bob = 0;
+  if (mood === 'work') bob = [0, -1, 0, 0][f % 4];
+  if (mood === 'jump') bob = [0, -2, -3, -2][f % 4];
+  if (mood === 'happy') bob = [0, -1][f % 2];
+  if (mood === 'sleep') { rx = 6.5 + (f % 8 < 4 ? .3 : 0); ry = 5.5 - (f % 8 < 4 ? .3 : 0); }
+  if (mood === 'dead') { rx = 8.2; ry = 3.2; cy = 15.5; }
+  cy += bob;
+
+  const inside = (x, y) => { const dx = (x + .5 - 10) / rx, dy = (y + .5 - cy) / ry; return dx * dx + dy * dy <= 1 && y <= 17; };
+  const edge = mix(color, 'black', .45), light = mix(color, 'white', .5);
+  let top = 20;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    if (!inside(x, y)) continue;
+    top = Math.min(top, y);
+    const border = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    px(x, y, border ? edge : color);
+  }
+  // shine
+  if (mood !== 'dead') { px(6, top + 2, light); px(7, top + 1, light); px(6, top + 1, light); }
+
+  // braided tuft: three rows zig-zagging in alternating strands
+  if (mood !== 'dead') {
+    const strands = tuft || [mix(color, 'white', .35), edge, color];
+    const sway = mood === 'work' || mood === 'jump' ? (f % 4 < 2 ? 0 : 1) : 0;
+    for (let k = 1; k <= 4; k++) {
+      const x = 9 + ((k + sway) % 2);
+      px(x, top - k, strands[k % strands.length]);
+      px(x === 9 ? 10 : 9, top - k, k === 4 ? strands[(k + 1) % strands.length] : 'transparent');
+    }
+    px(9, top - 5, strands[0]); px(11, top - 5, strands[1]); px(10, top - 5, strands[2]);
+  }
+
+  // face
+  const ey = Math.round(cy) - 1;
+  const ly = Math.round(cy) + 2; // where the hands are
+  const blink = f % 26 === 0;
+  const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  const yarn = color, yarnDark = mix(color, 'black', .35), yarnLight = mix(color, 'white', .5);
+  switch (mood) {
+    case 'sleep':
+      px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
+      { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
+        [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      // waiting: the ball of wool sits beside it, end trailing on the floor
+      drawYarnBall(px, yarn, 0);
+      [[4, 18], [5, 19], [6, 19], [7, 18]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'happy':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      // finished: a neat swatch with a fringe, and the ball tidy beside it
+      drawSwatch(px, yarn, ly, 4, 0, 6, 13);
+      [6, 8, 11, 13].forEach((x) => px(x, ly + 4, yarn));
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'dead':
+      [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      // tangled: the strand has knotted itself all over it
+      for (let x = 3; x <= 17; x++) px(x, 12 + ((x * 7) % 5), (x % 2 ? yarn : yarnDark));
+      for (let x = 4; x <= 16; x += 3) { px(x, 11 + (x % 4), yarnLight); px(x + 1, 17, yarnDark); }
+      drawYarnBall(px, yarn, 1);
+      [[4, 17], [6, 16], [8, 17], [9, 15]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'tied':
+      eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
+      // wrapped in its own wool: the strand it needs never arrived
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? yarnDark : yarn);
+      for (let x = 4; x < 16; x++) if (inside(x, Math.round(cy) + 4)) px(x, Math.round(cy) + 4, x % 2 ? yarn : yarnDark);
+      px(16, Math.round(cy) + 1, yarnDark); px(17, Math.round(cy) + 3, yarn);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'inspect': {
+      const look = f % 8 < 4 ? 1 : 0;
+      eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
+      // checking the stitches: the swatch in front, a magnifying glass over it
+      drawSwatch(px, yarn, ly, 3, 0);
+      [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
+      px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
+      px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      drawYarnBall(px, yarn, 0);
+      break;
+    }
+    case 'review':
+      eyes(7, 12, ey, blink ? 1 : 2);
+      for (let x = 5; x <= 14; x++) if (x !== 9 && x !== 10) px(x, ey - 1, ink);
+      px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
+      px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
+      px(9, ey - 1, ink); px(10, ey - 1, ink);
+      drawSwatch(px, yarn, ly + 1, 3, 0);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'work': {
+      eyes(7, 12, ey + 1, blink ? 1 : 2);
+      // knitting: the ball unwinds, the strand runs up to two clicking needles, and a swatch grows below them
+      drawYarnBall(px, yarn, f % 3);
+      [[3, 16], [4, 16 - (f % 2)], [4, 15], [5, 15]].forEach(([x, y]) => px(x, y, yarn));
+      drawSwatch(px, yarn, ly + 1, 3, f);
+      px(7 + (f % 6), ly + 1, yarnLight); // the stitch being made
+      const k = f % 4 < 2; // needles take turns, so they click
+      const needle = '#e4e1f0', tip = '#ffffff';
+      for (let i = 0; i < 5; i++) { // a shadow under each needle, so it stands out against a light body
+        px(5 + i, ly + 2 - i - (k ? 1 : 0), yarnDark);
+        px(14 - i, ly + 2 - i - (k ? 0 : 1), yarnDark);
+      }
+      for (let i = 0; i < 5; i++) {
+        px(5 + i, ly + 1 - i - (k ? 1 : 0), i === 4 ? tip : needle);
+        px(14 - i, ly + 1 - i - (k ? 0 : 1), i === 4 ? tip : needle);
+      }
+      px(5, ly + 1 - (k ? 1 : 0), yarnLight); px(14, ly + 1 - (k ? 0 : 1), yarnLight); // coloured needle ends
+      if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
+      break;
+    }
+    case 'jump':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      // tying it in: holds the strand end up towards the braid
+      for (let i = 0, y = ly - 2; y >= -2; i++, y--) px(15 + (((i + f) % 4) < 2 ? 0 : 1), y, i % 2 ? yarn : yarnLight);
+      px(14, ly - 1, yarn); px(14, ly, yarnDark);
+      drawYarnBall(px, yarn, f % 3);
+      break;
+    default:
+      eyes(7, 12, ey, blink ? 1 : 2);
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      drawYarnBall(px, yarn, 0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+window.BraidSprites = { drawBlob, TASK_COLORS, KNOT, MOOD };
+})();
+
+  </script>
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var D = 5.538, BEAT = 0.4615, W1 = 3.692, W2 = 4.1535, W3 = 4.615;
+      var $ = function (id) { return document.getElementById(id); };
+      var Q = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+      var SEGS = [["braid plan", "#b48cff"], [' "Add a notes API with auth, validation, tests and docs"', "#ecebf5"], [" --verify", "#9a9cb3"], [' "npm test"', "#ecebf5"]];
+      var CMD_LEN = SEGS.reduce(function (a, s) { return a + s[1 - 1].length; }, 0);
+      var T0 = 0.35, T1 = 1.62;
+      var L1 = BEAT * 4, L2 = BEAT * 5, L3 = BEAT * 6, L4 = BEAT * 7;
+      var knot = $("p04-knot"), kctx = knot.getContext("2d");
+      var blobs = Q(".p04-blob").map(function (c) { return { c: c, ctx: c.getContext("2d"), color: c.getAttribute("data-color"), i: +c.getAttribute("data-i"), last: -1 }; });
+      var cmdEl = $("p04-cmd"), lastN = -1, lastKnot = "";
+      function cmdHTML(n) {
+        var out = "", left = n;
+        for (var i = 0; i < SEGS.length && left > 0; i++) {
+          var t = SEGS[i][0].slice(0, left); left -= t.length;
+          out += '<span style="color:' + SEGS[i][1] + '">' + t.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
+        }
+        return out;
+      }
+      function render(t) {
+        var f = Math.floor(t * 8);
+        // typing
+        var n = t <= T0 ? 0 : Math.min(CMD_LEN, Math.floor((t - T0) / (T1 - T0) * CMD_LEN));
+        if (n !== lastN) { cmdEl.innerHTML = cmdHTML(n); lastN = n; }
+        var blink = Math.floor(t / (BEAT / 2)) % 2 === 0;
+        var typing = t > T0 && t < T1;
+        $("p04-caret1").style.visibility = (t < L1 && (typing || blink)) ? "inherit" : "hidden";
+        $("p04-o1").style.visibility = t >= L1 ? "inherit" : "hidden";
+        $("p04-o2").style.visibility = t >= L2 ? "inherit" : "hidden";
+        $("p04-o3").style.visibility = t >= L3 ? "inherit" : "hidden";
+        $("p04-pr2").style.visibility = t >= L4 ? "inherit" : "hidden";
+        $("p04-caret2").style.visibility = (t >= L4 && blink) ? "inherit" : "hidden";
+        // sprites
+        var mood = (t >= L1 && t < W1) ? "inspect" : "work";
+        kctx.imageSmoothingEnabled = false;
+        window.BraidSprites.drawBlob(kctx, window.BraidSprites.KNOT.color, mood, f, window.BraidSprites.KNOT.tuft);
+        blobs.forEach(function (b) {
+          var ff = f + b.i * 3;
+          if (b.last === ff) return;
+          b.last = ff;
+          window.BraidSprites.drawBlob(b.ctx, b.color, "sleep", ff);
+        });
+      }
+      // note: knot redraws every call (cheap, 24x24); blobs only on frame change
+
+      var tl = gsap.timeline({ paused: true });
+      tl.to({}, { duration: D, onUpdate: function () { render(tl.time()); } }, 0);
+
+      // Scene 1: panels slide in from their edges
+      tl.fromTo("#p04-floor", { x: -1344 }, { x: 0, duration: 0.5, ease: "power3.out" }, 0);
+      tl.fromTo("#p04-braid", { x: 600 }, { x: 0, duration: 0.5, ease: "power3.out" }, 0);
+
+      // Scene 2: Knot's bubble
+      tl.fromTo("#p04-bubble", { opacity: 0, scale: 0.85 }, { opacity: 1, scale: 1, duration: 0.25, ease: "power3.out" }, L2);
+      tl.set("#p04-bubble", { opacity: 0 }, W1);
+
+      // Scene 3: terminal sheet collapses into the floor panel title
+      tl.to("#p04-term", { opacity: 0, duration: 0.14, ease: "none" }, W1);
+      tl.fromTo("#p04-sheet", { height: 912 }, { height: 72, duration: 0.42, ease: "power3.inOut" }, W1 + 0.03);
+      tl.to("#p04-sheet", { opacity: 0, duration: 0.1, ease: "none" }, W1 + 0.45);
+      tl.fromTo("#p04-ftitle,#p04-fline,#p04-plan-file", { opacity: 0 }, { opacity: 1, duration: 0.12, ease: "none" }, W1 + 0.3);
+      tl.fromTo("#p04-merged-none", { opacity: 0 }, { opacity: 1, duration: 0.01 }, W1);
+      tl.fromTo("#p04-rope", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, W1 + 0.1);
+
+      // desks land by wave on successive beats; threads draw to each dependent
+      var waveAt = { 1: W1, 2: W2, 3: W3 };
+      [1, 2, 3].forEach(function (w) {
+        var ds = Q('.p04-desk[data-wave="' + w + '"]');
+        ds.forEach(function (d, k) {
+          tl.fromTo(d, { opacity: 0, y: 22, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.34, ease: "power3.out" }, waveAt[w] + k * 0.06);
+        });
+        var ts = Q('.p04-thread[data-wave="' + w + '"]');
+        ts.forEach(function (p, k) {
+          tl.fromTo(p, { strokeDashoffset: 1 }, { strokeDashoffset: 0, duration: 0.42, ease: "power2.inOut" }, waveAt[w] + 0.1 + k * 0.05);
+        });
+      });
+
+      window.__timelines["04-plan"] = tl;
+      render(0);
+    })();
+  </script>
+</template>

@@ -1,0 +1,8 @@
+braid. A team of coding agents for your repo.
+It breaks a goal into a graph of tasks, runs each task with a coding agent (Claude Code, Codex) in its own git worktree, and checks the result before merging it. The checks are your tests, an optional reviewer agent, and your tests again on the merged tree.
+Your branches are never touched. Work lands on braid/<runId>/integration.
+braid plan "add rate limiting to the API" --verify "npm test" --out plans/rate-limit.json
+braid run plans/rate-limit.json
+npm install && npm run build && npm link
+github.com/gauransh18/braid
+Approved lines: "A team of coding agents for your repo." "Your branches are never touched." "All 7 strands braided." "Many agents. One clean branch." "Nothing merges until tests pass."

@@ -1,0 +1,490 @@
+<template>
+  <style>
+    @font-face { font-family: "Pixelify Sans"; font-weight: 400; src: url("assets/pixelify-sans-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Pixelify Sans"; font-weight: 600; src: url("assets/pixelify-sans-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Pixelify Sans"; font-weight: 700; src: url("assets/pixelify-sans-latin-700-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("assets/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 600; src: url("assets/jetbrains-mono-latin-600-normal.woff2") format("woff2"); }
+
+    #root { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; color: #ecebf5; font-family: "Pixelify Sans", sans-serif; }
+    #root * { box-sizing: border-box; margin: 0; padding: 0; }
+    .f07-bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background-color: #12131c;
+      background-image: linear-gradient(rgba(255,255,255,.025) 2px, transparent 2px), linear-gradient(90deg, rgba(255,255,255,.025) 2px, transparent 2px);
+      background-size: 12px 12px; }
+    .f07-cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 1060px 576px; }
+    .f07-header { position: absolute; left: 0; top: 0; width: 1920px; height: 96px; border-bottom: 1px solid #2c2f44; background: #12131c; }
+    canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+    #f07-knot { position: absolute; left: 48px; top: 12px; width: 72px; height: 72px; }
+    .f07-word { position: absolute; left: 136px; top: 0; height: 96px; line-height: 96px; font-weight: 700; font-size: 44px; letter-spacing: -0.02em; }
+    .f07-bubble { position: absolute; left: 300px; top: 17px; height: 62px; padding: 0 24px; display: flex; align-items: center; background: #1d1f2d; border: 2px solid #b48cff; border-radius: 12px; font-weight: 600; font-size: 30px; white-space: nowrap; transform-origin: 0 50%; }
+    .f07-bubble::before { content: ""; position: absolute; left: -9px; top: 21px; width: 14px; height: 14px; background: #1d1f2d; border-left: 2px solid #b48cff; border-bottom: 2px solid #b48cff; transform: rotate(45deg); }
+    .f07-pill { position: absolute; left: 1236px; top: 31px; height: 34px; padding: 0 16px 0 14px; display: flex; align-items: center; gap: 9px; border: 1px solid #3a3e58; border-radius: 999px; font-family: "JetBrains Mono", monospace; font-size: 16px; color: #9a9cb3; }
+    .f07-pill::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: #9a9cb3; }
+    .f07-stats { position: absolute; right: 48px; top: 0; height: 96px; display: flex; align-items: center; gap: 52px; }
+    .f07-stat { display: flex; align-items: baseline; gap: 12px; }
+    .f07-stat label { font-size: 22px; color: #9a9cb3; }
+    .f07-stat .v { font-weight: 700; font-size: 44px; letter-spacing: -0.02em; line-height: 1; display: inline-block; min-width: 82px; text-align: left; }
+    .f07-stat .m { font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 32px; line-height: 1; min-width: 118px; display: inline-block; }
+    .f07-panel { position: absolute; background: #1d1f2d; border: 1px solid #2c2f44; border-radius: 14px; box-shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.6); }
+    .f07-ptitle { position: absolute; font-weight: 600; font-size: 30px; line-height: 36px; }
+    .f07-floorgrp { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+    .f07-threads { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; }
+    .f07-thread { fill: none; stroke: #3a3e58; stroke-width: 3; stroke-linecap: round; }
+    .f07-desk { position: absolute; width: 330px; height: 150px; background: #232638; border: 2px solid #2c2f44; border-radius: 12px; overflow: hidden; }
+    .f07-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--tc); }
+    .f07-did { position: absolute; left: 26px; top: 12px; font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 20px; color: var(--tc); line-height: 26px; }
+    .f07-dtitle { position: absolute; left: 26px; top: 42px; width: 206px; font-size: 20px; line-height: 24px; color: #ecebf5; }
+    .f07-blob { position: absolute; left: 244px; top: 10px; width: 72px; height: 72px; }
+    .f07-chip { position: absolute; left: 26px; top: 102px; height: 28px; padding: 0 11px; border-radius: 5px; display: flex; align-items: center; font-family: "JetBrains Mono", monospace; font-size: 15px; background: rgba(255,255,255,.06); color: #9a9cb3; }
+    .f07-chip.running { background: rgba(108,182,255,.15); color: #6cb6ff; }
+    .f07-chip.done { background: rgba(63,207,142,.15); color: #3fcf8e; }
+    .f07-dots { position: absolute; left: 142px; top: 112px; display: flex; gap: 7px; }
+    .f07-dots b { width: 10px; height: 10px; border-radius: 3px; border: 2px solid #3a3e58; }
+    .f07-dcost { position: absolute; right: 18px; top: 104px; font-family: "JetBrains Mono", monospace; font-size: 18px; color: #9a9cb3; line-height: 26px; }
+    .f07-svg { position: absolute; left: 1344px; top: 196px; width: 112px; height: 780px; overflow: visible; }
+    .f07-strand { fill: none; stroke-width: 11; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 2; }
+    .f07-bead { position: absolute; width: 30px; height: 30px; border-radius: 6px; border: 3px solid #1d1f2d; }
+    .f07-rl { position: absolute; left: 1450px; width: 396px; height: 52px; }
+    .f07-rl b { display: block; font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 22px; line-height: 28px; }
+    .f07-rl span { display: block; font-size: 20px; line-height: 24px; color: #9a9cb3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .f07-tail { position: absolute; left: 1450px; width: 396px; font-size: 20px; color: #9a9cb3; line-height: 24px; }
+  </style>
+
+  <div data-hf-id="hf-804c" id="root" data-composition-id="07-rope" data-width="1920" data-height="1080" data-start="0" data-duration="5.538">
+    <div data-hf-id="hf-r1cb" class="clip f07-bg" id="f07-bg" data-start="0" data-duration="5.538" data-track-index="0"></div>
+    <div data-hf-id="hf-d4vg" class="clip f07-cam" id="f07-cam" data-start="0" data-duration="5.538" data-track-index="1">
+      <div data-hf-id="hf-lxfl" class="f07-floorgrp" id="f07-floor">
+      <div data-hf-id="hf-5k7y" class="f07-panel" style="left:48px;top:120px;width:1248px;height:912px">
+        <div data-hf-id="hf-zx4i" class="f07-ptitle" style="left:48px;top:24px">The floor</div>
+      </div>
+      <svg data-hf-id="hf-1j6j" class="f07-threads" id="f07-threads" viewBox="0 0 1920 1080">
+        <path data-hf-id="hf-8oww" class="f07-thread" id="f07-th-0" d="M426 305 C471 305 471 305 516 305" />
+        <path data-hf-id="hf-e3kv" class="f07-thread" id="f07-th-1" d="M426 485 C471 485 471 305 516 305" />
+        <path data-hf-id="hf-f04k" class="f07-thread" id="f07-th-2" d="M426 665 C471 665 471 305 516 305" />
+        <path data-hf-id="hf-vgiz" class="f07-thread" id="f07-th-3" d="M426 305 C471 305 471 485 516 485" />
+        <path data-hf-id="hf-46pg" class="f07-thread" id="f07-th-4" d="M846 305 C891 305 891 305 936 305" />
+        <path data-hf-id="hf-99rt" class="f07-thread" id="f07-th-5" d="M846 305 C891 305 891 485 936 485" />
+      </svg>
+      <div data-hf-id="hf-pqj7" id="f07-desks">
+
+      <div data-hf-id="hf-vmyv" class="f07-desk" id="f07-desk-schema" style="left:96px;top:230px;--tc:#ff7a90">
+        <i data-hf-id="hf-bcid" class="f07-bar"></i>
+        <div data-hf-id="hf-jywe" class="f07-did">schema</div>
+        <div data-hf-id="hf-8rd1" class="f07-dtitle">Note schema and validation</div>
+        <canvas data-hf-id="hf-4j8q" class="f07-blob" id="f07-blob-schema" width="24" height="24"></canvas>
+        <div data-hf-id="hf-bcu0" class="f07-chip pending" id="f07-chip-schema">pending</div>
+        <div data-hf-id="hf-ddvi" class="f07-dots" id="f07-dots-schema"><b data-hf-id="hf-xujp"></b><b data-hf-id="hf-ey49"></b><b data-hf-id="hf-g51c"></b></div>
+        <div data-hf-id="hf-6gl0" class="f07-dcost" id="f07-cost-schema">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-4mok" class="f07-desk" id="f07-desk-auth" style="left:96px;top:410px;--tc:#3cc8b4">
+        <i data-hf-id="hf-7m15" class="f07-bar"></i>
+        <div data-hf-id="hf-xquv" class="f07-did">auth</div>
+        <div data-hf-id="hf-ash3" class="f07-dtitle">Token auth middleware</div>
+        <canvas data-hf-id="hf-rrrn" class="f07-blob" id="f07-blob-auth" width="24" height="24"></canvas>
+        <div data-hf-id="hf-ta5x" class="f07-chip pending" id="f07-chip-auth">pending</div>
+        <div data-hf-id="hf-d4cp" class="f07-dots" id="f07-dots-auth"><b data-hf-id="hf-fqqb"></b><b data-hf-id="hf-dr76"></b><b data-hf-id="hf-dcw5"></b></div>
+        <div data-hf-id="hf-45a9" class="f07-dcost" id="f07-cost-auth">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-6qwt" class="f07-desk" id="f07-desk-errors" style="left:96px;top:590px;--tc:#f5b942">
+        <i data-hf-id="hf-8sy8" class="f07-bar"></i>
+        <div data-hf-id="hf-kvam" class="f07-did">errors</div>
+        <div data-hf-id="hf-t0pi" class="f07-dtitle">Error responses</div>
+        <canvas data-hf-id="hf-dwtu" class="f07-blob" id="f07-blob-errors" width="24" height="24"></canvas>
+        <div data-hf-id="hf-mtbg" class="f07-chip pending" id="f07-chip-errors">pending</div>
+        <div data-hf-id="hf-b7gu" class="f07-dots" id="f07-dots-errors"><b data-hf-id="hf-ejt8"></b><b data-hf-id="hf-e5i7"></b><b data-hf-id="hf-c5z2"></b></div>
+        <div data-hf-id="hf-1hmc" class="f07-dcost" id="f07-cost-errors">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-0qfw" class="f07-desk" id="f07-desk-routes" style="left:516px;top:230px;--tc:#9b7bff">
+        <i data-hf-id="hf-8en7" class="f07-bar"></i>
+        <div data-hf-id="hf-yue7" class="f07-did">routes</div>
+        <div data-hf-id="hf-w33a" class="f07-dtitle">CRUD routes</div>
+        <canvas data-hf-id="hf-fb3v" class="f07-blob" id="f07-blob-routes" width="24" height="24"></canvas>
+        <div data-hf-id="hf-606p" class="f07-chip pending" id="f07-chip-routes">pending</div>
+        <div data-hf-id="hf-c3xt" class="f07-dots" id="f07-dots-routes"><b data-hf-id="hf-bro1"></b><b data-hf-id="hf-yhbf"></b><b data-hf-id="hf-yvmg"></b></div>
+        <div data-hf-id="hf-p19l" class="f07-dcost" id="f07-cost-routes">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-2px0" class="f07-desk" id="f07-desk-docs" style="left:516px;top:410px;--tc:#8fd14f">
+        <i data-hf-id="hf-6f42" class="f07-bar"></i>
+        <div data-hf-id="hf-bahm" class="f07-did">docs</div>
+        <div data-hf-id="hf-bnht" class="f07-dtitle">API reference</div>
+        <canvas data-hf-id="hf-f0sa" class="f07-blob" id="f07-blob-docs" width="24" height="24"></canvas>
+        <div data-hf-id="hf-s0zo" class="f07-chip pending" id="f07-chip-docs">pending</div>
+        <div data-hf-id="hf-2odm" class="f07-dots" id="f07-dots-docs"><b data-hf-id="hf-xopd"></b><b data-hf-id="hf-y30e"></b><b data-hf-id="hf-ww3b"></b></div>
+        <div data-hf-id="hf-11k8" class="f07-dcost" id="f07-cost-docs">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-jayb" class="f07-desk" id="f07-desk-tests" style="left:936px;top:230px;--tc:#5aa9ff">
+        <i data-hf-id="hf-60t1" class="f07-bar"></i>
+        <div data-hf-id="hf-ta2y" class="f07-did">tests</div>
+        <div data-hf-id="hf-br30" class="f07-dtitle">Route tests</div>
+        <canvas data-hf-id="hf-rhe0" class="f07-blob" id="f07-blob-tests" width="24" height="24"></canvas>
+        <div data-hf-id="hf-u4w6" class="f07-chip pending" id="f07-chip-tests">pending</div>
+        <div data-hf-id="hf-nh8a" class="f07-dots" id="f07-dots-tests"><b data-hf-id="hf-xaec"></b><b data-hf-id="hf-w3h9"></b><b data-hf-id="hf-whsa"></b></div>
+        <div data-hf-id="hf-2imw" class="f07-dcost" id="f07-cost-tests">$0.00</div>
+      </div>
+
+      <div data-hf-id="hf-xmxy" class="f07-desk" id="f07-desk-sdk" style="left:936px;top:410px;--tc:#ff9a4d">
+        <i data-hf-id="hf-77q4" class="f07-bar"></i>
+        <div data-hf-id="hf-y8tv" class="f07-did">sdk</div>
+        <div data-hf-id="hf-lgsj" class="f07-dtitle">Typed client SDK</div>
+        <canvas data-hf-id="hf-k3bh" class="f07-blob" id="f07-blob-sdk" width="24" height="24"></canvas>
+        <div data-hf-id="hf-ndmn" class="f07-chip pending" id="f07-chip-sdk">pending</div>
+        <div data-hf-id="hf-l69x" class="f07-dots" id="f07-dots-sdk"><b data-hf-id="hf-1nrn"></b><b data-hf-id="hf-222o"></b><b data-hf-id="hf-w6c0"></b></div>
+        <div data-hf-id="hf-d6vp" class="f07-dcost" id="f07-cost-sdk">$0.00</div>
+      </div>
+      </div>
+      </div>
+
+      <div data-hf-id="hf-5kgz" class="f07-panel" id="f07-braid" style="left:1320px;top:120px;width:552px;height:912px">
+        <div data-hf-id="hf-rjla" class="f07-ptitle" style="left:48px;top:24px">The braid</div>
+      </div>
+      <svg data-hf-id="hf-05fk" class="f07-svg" viewBox="0 0 112 780" aria-hidden="true">
+        <defs data-hf-id="hf-mh0t"><clippath data-hf-id="hf-nqzv" id="f07-tailclip"><rect data-hf-id="hf-e3jn" id="f07-tailrect" x="-40" y="236" width="192" height="780" /></clippath></defs>
+        <rect data-hf-id="hf-3mpi" x="28" y="4" width="56" height="20" rx="6" fill="#3a3e58" />
+        <g data-hf-id="hf-4sin" clip-path="url(#f07-tailclip)"><line data-hf-id="hf-0p7s" x1="32" y1="28" x2="32" y2="756" stroke="#3a3e58" stroke-width="5" stroke-dasharray="6 10" /><line data-hf-id="hf-prjc" x1="56" y1="28" x2="56" y2="756" stroke="#3a3e58" stroke-width="5" stroke-dasharray="6 10" /><line data-hf-id="hf-ev00" x1="80" y1="28" x2="80" y2="756" stroke="#3a3e58" stroke-width="5" stroke-dasharray="6 10" /></g>
+        <path data-hf-id="hf-mqyh" class="f07-strand f07-seg-0" d="M56.0 28.0L67.2 36.0L75.8 44.0L79.8 52.0L78.4 60.0L71.9 68.0L61.7 76.0L50.3 84.0L40.1 92.0L33.6 100.0L32.2 108.0L36.2 116.0L44.8 124.0L56.0 132.0" stroke="#ff7a90" pathLength="1" /><path data-hf-id="hf-lew6" class="f07-strand f07-seg-0" d="M76.8 28.0L68.8 36.0L57.9 44.0L46.6 52.0L37.4 60.0L32.5 68.0L32.9 76.0L38.7 84.0L48.4 92.0L59.8 100.0L70.4 108.0L77.7 116.0L80.0 124.0L76.8 132.0" stroke="#ff7a90" pathLength="1" /><path data-hf-id="hf-0nkp" class="f07-strand f07-seg-0" d="M35.2 28.0L32.0 36.0L34.3 44.0L41.6 52.0L52.2 60.0L63.6 68.0L73.3 76.0L79.1 84.0L79.5 92.0L74.6 100.0L65.4 108.0L54.1 116.0L43.2 124.0L35.2 132.0" stroke="#ff7a90" pathLength="1" />
+        <path data-hf-id="hf-mj7h" class="f07-strand f07-seg-1" d="M56.0 132.0L67.2 140.0L75.8 148.0L79.8 156.0L78.4 164.0L71.9 172.0L61.7 180.0L50.3 188.0L40.1 196.0L33.6 204.0L32.2 212.0L36.2 220.0L44.8 228.0L56.0 236.0" stroke="#f5b942" pathLength="1" /><path data-hf-id="hf-4qst" class="f07-strand f07-seg-1" d="M76.8 132.0L68.8 140.0L57.9 148.0L46.6 156.0L37.4 164.0L32.5 172.0L32.9 180.0L38.7 188.0L48.4 196.0L59.8 204.0L70.4 212.0L77.7 220.0L80.0 228.0L76.8 236.0" stroke="#ff7a90" pathLength="1" /><path data-hf-id="hf-6ajg" class="f07-strand f07-seg-1" d="M35.2 132.0L32.0 140.0L34.3 148.0L41.6 156.0L52.2 164.0L63.6 172.0L73.3 180.0L79.1 188.0L79.5 196.0L74.6 204.0L65.4 212.0L54.1 220.0L43.2 228.0L35.2 236.0" stroke="#ff7a90" pathLength="1" />
+        <path data-hf-id="hf-4xji" class="f07-strand f07-seg-2" d="M56.0 236.0L67.2 244.0L75.8 252.0L79.8 260.0L78.4 268.0L71.9 276.0L61.7 284.0L50.3 292.0L40.1 300.0L33.6 308.0L32.2 316.0L36.2 324.0L44.8 332.0L56.0 340.0" stroke="#3cc8b4" pathLength="1" /><path data-hf-id="hf-sod0" class="f07-strand f07-seg-2" d="M76.8 236.0L68.8 244.0L57.9 252.0L46.6 260.0L37.4 268.0L32.5 276.0L32.9 284.0L38.7 292.0L48.4 300.0L59.8 308.0L70.4 316.0L77.7 324.0L80.0 332.0L76.8 340.0" stroke="#f5b942" pathLength="1" /><path data-hf-id="hf-tswc" class="f07-strand f07-seg-2" d="M35.2 236.0L32.0 244.0L34.3 252.0L41.6 260.0L52.2 268.0L63.6 276.0L73.3 284.0L79.1 292.0L79.5 300.0L74.6 308.0L65.4 316.0L54.1 324.0L43.2 332.0L35.2 340.0" stroke="#ff7a90" pathLength="1" />
+        <path data-hf-id="hf-1u82" class="f07-strand f07-seg-3" d="M56.0 340.0L67.2 348.0L75.8 356.0L79.8 364.0L78.4 372.0L71.9 380.0L61.7 388.0L50.3 396.0L40.1 404.0L33.6 412.0L32.2 420.0L36.2 428.0L44.8 436.0L56.0 444.0" stroke="#8fd14f" pathLength="1" /><path data-hf-id="hf-8jxv" class="f07-strand f07-seg-3" d="M76.8 340.0L68.8 348.0L57.9 356.0L46.6 364.0L37.4 372.0L32.5 380.0L32.9 388.0L38.7 396.0L48.4 404.0L59.8 412.0L70.4 420.0L77.7 428.0L80.0 436.0L76.8 444.0" stroke="#3cc8b4" pathLength="1" /><path data-hf-id="hf-ge3l" class="f07-strand f07-seg-3" d="M35.2 340.0L32.0 348.0L34.3 356.0L41.6 364.0L52.2 372.0L63.6 380.0L73.3 388.0L79.1 396.0L79.5 404.0L74.6 412.0L65.4 420.0L54.1 428.0L43.2 436.0L35.2 444.0" stroke="#f5b942" pathLength="1" />
+        <path data-hf-id="hf-w7p9" class="f07-strand f07-seg-4" d="M56.0 444.0L67.2 452.0L75.8 460.0L79.8 468.0L78.4 476.0L71.9 484.0L61.7 492.0L50.3 500.0L40.1 508.0L33.6 516.0L32.2 524.0L36.2 532.0L44.8 540.0L56.0 548.0" stroke="#9b7bff" pathLength="1" /><path data-hf-id="hf-yzwv" class="f07-strand f07-seg-4" d="M76.8 444.0L68.8 452.0L57.9 460.0L46.6 468.0L37.4 476.0L32.5 484.0L32.9 492.0L38.7 500.0L48.4 508.0L59.8 516.0L70.4 524.0L77.7 532.0L80.0 540.0L76.8 548.0" stroke="#8fd14f" pathLength="1" /><path data-hf-id="hf-jc2a" class="f07-strand f07-seg-4" d="M35.2 444.0L32.0 452.0L34.3 460.0L41.6 468.0L52.2 476.0L63.6 484.0L73.3 492.0L79.1 500.0L79.5 508.0L74.6 516.0L65.4 524.0L54.1 532.0L43.2 540.0L35.2 548.0" stroke="#3cc8b4" pathLength="1" />
+        <path data-hf-id="hf-dckx" class="f07-strand f07-seg-5" d="M56.0 548.0L67.2 556.0L75.8 564.0L79.8 572.0L78.4 580.0L71.9 588.0L61.7 596.0L50.3 604.0L40.1 612.0L33.6 620.0L32.2 628.0L36.2 636.0L44.8 644.0L56.0 652.0" stroke="#5aa9ff" pathLength="1" /><path data-hf-id="hf-bl6e" class="f07-strand f07-seg-5" d="M76.8 548.0L68.8 556.0L57.9 564.0L46.6 572.0L37.4 580.0L32.5 588.0L32.9 596.0L38.7 604.0L48.4 612.0L59.8 620.0L70.4 628.0L77.7 636.0L80.0 644.0L76.8 652.0" stroke="#9b7bff" pathLength="1" /><path data-hf-id="hf-m4ds" class="f07-strand f07-seg-5" d="M35.2 548.0L32.0 556.0L34.3 564.0L41.6 572.0L52.2 580.0L63.6 588.0L73.3 596.0L79.1 604.0L79.5 612.0L74.6 620.0L65.4 628.0L54.1 636.0L43.2 644.0L35.2 652.0" stroke="#8fd14f" pathLength="1" />
+        <path data-hf-id="hf-yiw7" class="f07-strand f07-seg-6" d="M56.0 652.0L67.2 660.0L75.8 668.0L79.8 676.0L78.4 684.0L71.9 692.0L61.7 700.0L50.3 708.0L40.1 716.0L33.6 724.0L32.2 732.0L36.2 740.0L44.8 748.0L56.0 756.0" stroke="#ff9a4d" pathLength="1" /><path data-hf-id="hf-dwx0" class="f07-strand f07-seg-6" d="M76.8 652.0L68.8 660.0L57.9 668.0L46.6 676.0L37.4 684.0L32.5 692.0L32.9 700.0L38.7 708.0L48.4 716.0L59.8 724.0L70.4 732.0L77.7 740.0L80.0 748.0L76.8 756.0" stroke="#5aa9ff" pathLength="1" /><path data-hf-id="hf-ivqz" class="f07-strand f07-seg-6" d="M35.2 652.0L32.0 660.0L34.3 668.0L41.6 676.0L52.2 684.0L63.6 692.0L73.3 700.0L79.1 708.0L79.5 716.0L74.6 724.0L65.4 732.0L54.1 740.0L43.2 748.0L35.2 756.0" stroke="#9b7bff" pathLength="1" />
+      </svg>
+      <div data-hf-id="hf-cl2x" class="f07-bead" id="f07-bead-0" style="left:1385px;top:261px;background:#ff7a90"></div>
+      <div data-hf-id="hf-ryq4" class="f07-bead" id="f07-bead-1" style="left:1385px;top:365px;background:#f5b942"></div>
+      <div data-hf-id="hf-ehi3" class="f07-bead" id="f07-bead-2" style="left:1385px;top:469px;background:#3cc8b4"></div>
+      <div data-hf-id="hf-g2x0" class="f07-bead" id="f07-bead-3" style="left:1385px;top:573px;background:#8fd14f"></div>
+      <div data-hf-id="hf-npcz" class="f07-bead" id="f07-bead-4" style="left:1385px;top:677px;background:#9b7bff"></div>
+      <div data-hf-id="hf-mtdk" class="f07-bead" id="f07-bead-5" style="left:1385px;top:781px;background:#5aa9ff"></div>
+      <div data-hf-id="hf-wbme" class="f07-bead" id="f07-bead-6" style="left:1385px;top:885px;background:#ff9a4d"></div>
+      <div data-hf-id="hf-k1cj" class="f07-rl" id="f07-rl-0" style="top:250px"><b data-hf-id="hf-mtbs" style="color:#ff7a90">schema</b><span data-hf-id="hf-6vz4">Note schema and validation</span></div>
+      <div data-hf-id="hf-wd1z" class="f07-rl" id="f07-rl-1" style="top:354px"><b data-hf-id="hf-y7td" style="color:#f5b942">errors</b><span data-hf-id="hf-i9jh">Error responses</span></div>
+      <div data-hf-id="hf-462f" class="f07-rl" id="f07-rl-2" style="top:458px"><b data-hf-id="hf-4xhr" style="color:#3cc8b4">auth</b><span data-hf-id="hf-0z54">Token auth middleware</span></div>
+      <div data-hf-id="hf-2gtc" class="f07-rl" id="f07-rl-3" style="top:562px"><b data-hf-id="hf-ioc2" style="color:#8fd14f">docs</b><span data-hf-id="hf-vftq">API reference</span></div>
+      <div data-hf-id="hf-88m0" class="f07-rl" id="f07-rl-4" style="top:666px"><b data-hf-id="hf-9nms" style="color:#9b7bff">routes</b><span data-hf-id="hf-m9l9">CRUD routes</span></div>
+      <div data-hf-id="hf-nc2x" class="f07-rl" id="f07-rl-5" style="top:770px"><b data-hf-id="hf-5oa5" style="color:#5aa9ff">tests</b><span data-hf-id="hf-7ohj">Route tests</span></div>
+      <div data-hf-id="hf-hw1l" class="f07-rl" id="f07-rl-6" style="top:874px"><b data-hf-id="hf-tjbu" style="color:#ff9a4d">sdk</b><span data-hf-id="hf-f3gy">Typed client SDK</span></div>
+      <div data-hf-id="hf-n7tq" class="f07-tail" id="f07-tail"></div>
+    </div>
+      <div data-hf-id="hf-m6jt" class="f07-header">
+        <canvas data-hf-id="hf-5h6r" id="f07-knot" width="24" height="24"></canvas>
+        <div data-hf-id="hf-ffi8" class="f07-word">braid</div>
+        <div data-hf-id="hf-jhzs" class="f07-bubble" id="f07-bubble">All 7 strands braided.</div>
+        <div data-hf-id="hf-5hzt" class="f07-pill">demo run</div>
+        <div data-hf-id="hf-adh7" class="f07-stats">
+          <div data-hf-id="hf-8gd4" class="f07-stat"><label data-hf-id="hf-zy69">Merged</label><span data-hf-id="hf-c7jr" class="v" id="f07-merged">2/7</span></div>
+          <div data-hf-id="hf-0vu8" class="f07-stat"><label data-hf-id="hf-548b">Spend</label><span data-hf-id="hf-zpoc" class="m" id="f07-spend">$1.10</span></div>
+        </div>
+      </div>
+  </div>
+
+  <script>
+/* braid sprites, copied from ui/index.html (drawBlob and helpers). Pure painters: call drawBlob(ctx, color, mood, f, tuft) on a 24x24 canvas. f = floor(t*8). */
+(function(){
+'use strict';
+
+/* ================= palette + sprites ================= */
+const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
+const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost', replanning: 'inspect', replaced: 'ghost' };
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mix(h, target, amt) {
+  const a = hexToRgb(h), b = target === 'black' ? [18, 16, 30] : [255, 255, 255];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amt)).join(',')})`;
+}
+function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
+
+/** A ball of wool in the task's colour, bottom-left. `roll` turns the wrapped strands so it looks like it is unwinding. */
+function drawYarnBall(px, yarn, roll) {
+  const dark = mix(yarn, 'black', .4), light = mix(yarn, 'white', .5), cx = 1.5, cy = 18.5, r = 2.7;
+  for (let y = 15; y <= 22; y++) for (let x = -2; x <= 5; x++) {
+    const d = Math.hypot(x + .5 - cx, y + .5 - cy);
+    if (d > r) continue;
+    px(x, y, d > r - 1 ? dark : ((x + y + roll) % 3 === 0 ? light : yarn));
+  }
+}
+
+/** A little knitted swatch hanging in front of the agent: rows of stitches in two tones. `f` slides the pattern while it is being worked. */
+function drawSwatch(px, yarn, y0, rows, f, x0 = 7, x1 = 12) {
+  const light = mix(yarn, 'white', .45), dark = mix(yarn, 'black', .25);
+  for (let r = 0; r < rows; r++) {
+    const from = r === rows - 1 && rows > 2 ? x0 + 1 : x0, to = r === rows - 1 && rows > 2 ? x1 - 1 : x1;
+    for (let x = from; x <= to; x++) px(x, y0 + r, (x + r + f) % 2 ? yarn : light);
+    px(from, y0 + r, dark); px(to, y0 + r, dark);
+  }
+}
+
+/**
+ * 24x24 pixel blob (20x20 body art drawn at an offset, so there is room for wool). Original art drawn procedurally:
+ * a round body, a braided tuft on top, a face, and wool props that change with mood. The wool is the task's colour,
+ * the same colour its strand has in the braid. f = animation frame.
+ */
+function drawBlob(ctx, base, mood, f, tuft) {
+  const ink = '#12131c';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(2, 2);
+  const color = mood === 'ghost' ? grey(base) : base;
+  ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
+  const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+
+  let rx = 6.5, ry = 5.5, cy = 12.5, bob = 0;
+  if (mood === 'work') bob = [0, -1, 0, 0][f % 4];
+  if (mood === 'jump') bob = [0, -2, -3, -2][f % 4];
+  if (mood === 'happy') bob = [0, -1][f % 2];
+  if (mood === 'sleep') { rx = 6.5 + (f % 8 < 4 ? .3 : 0); ry = 5.5 - (f % 8 < 4 ? .3 : 0); }
+  if (mood === 'dead') { rx = 8.2; ry = 3.2; cy = 15.5; }
+  cy += bob;
+
+  const inside = (x, y) => { const dx = (x + .5 - 10) / rx, dy = (y + .5 - cy) / ry; return dx * dx + dy * dy <= 1 && y <= 17; };
+  const edge = mix(color, 'black', .45), light = mix(color, 'white', .5);
+  let top = 20;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    if (!inside(x, y)) continue;
+    top = Math.min(top, y);
+    const border = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    px(x, y, border ? edge : color);
+  }
+  // shine
+  if (mood !== 'dead') { px(6, top + 2, light); px(7, top + 1, light); px(6, top + 1, light); }
+
+  // braided tuft: three rows zig-zagging in alternating strands
+  if (mood !== 'dead') {
+    const strands = tuft || [mix(color, 'white', .35), edge, color];
+    const sway = mood === 'work' || mood === 'jump' ? (f % 4 < 2 ? 0 : 1) : 0;
+    for (let k = 1; k <= 4; k++) {
+      const x = 9 + ((k + sway) % 2);
+      px(x, top - k, strands[k % strands.length]);
+      px(x === 9 ? 10 : 9, top - k, k === 4 ? strands[(k + 1) % strands.length] : 'transparent');
+    }
+    px(9, top - 5, strands[0]); px(11, top - 5, strands[1]); px(10, top - 5, strands[2]);
+  }
+
+  // face
+  const ey = Math.round(cy) - 1;
+  const ly = Math.round(cy) + 2; // where the hands are
+  const blink = f % 26 === 0;
+  const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  const yarn = color, yarnDark = mix(color, 'black', .35), yarnLight = mix(color, 'white', .5);
+  switch (mood) {
+    case 'sleep':
+      px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
+      { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
+        [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      // waiting: the ball of wool sits beside it, end trailing on the floor
+      drawYarnBall(px, yarn, 0);
+      [[4, 18], [5, 19], [6, 19], [7, 18]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'happy':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      // finished: a neat swatch with a fringe, and the ball tidy beside it
+      drawSwatch(px, yarn, ly, 4, 0, 6, 13);
+      [6, 8, 11, 13].forEach((x) => px(x, ly + 4, yarn));
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'dead':
+      [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      // tangled: the strand has knotted itself all over it
+      for (let x = 3; x <= 17; x++) px(x, 12 + ((x * 7) % 5), (x % 2 ? yarn : yarnDark));
+      for (let x = 4; x <= 16; x += 3) { px(x, 11 + (x % 4), yarnLight); px(x + 1, 17, yarnDark); }
+      drawYarnBall(px, yarn, 1);
+      [[4, 17], [6, 16], [8, 17], [9, 15]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'tied':
+      eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
+      // wrapped in its own wool: the strand it needs never arrived
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? yarnDark : yarn);
+      for (let x = 4; x < 16; x++) if (inside(x, Math.round(cy) + 4)) px(x, Math.round(cy) + 4, x % 2 ? yarn : yarnDark);
+      px(16, Math.round(cy) + 1, yarnDark); px(17, Math.round(cy) + 3, yarn);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'inspect': {
+      const look = f % 8 < 4 ? 1 : 0;
+      eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
+      // checking the stitches: the swatch in front, a magnifying glass over it
+      drawSwatch(px, yarn, ly, 3, 0);
+      [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
+      px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
+      px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      drawYarnBall(px, yarn, 0);
+      break;
+    }
+    case 'review':
+      eyes(7, 12, ey, blink ? 1 : 2);
+      for (let x = 5; x <= 14; x++) if (x !== 9 && x !== 10) px(x, ey - 1, ink);
+      px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
+      px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
+      px(9, ey - 1, ink); px(10, ey - 1, ink);
+      drawSwatch(px, yarn, ly + 1, 3, 0);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'work': {
+      eyes(7, 12, ey + 1, blink ? 1 : 2);
+      // knitting: the ball unwinds, the strand runs up to two clicking needles, and a swatch grows below them
+      drawYarnBall(px, yarn, f % 3);
+      [[3, 16], [4, 16 - (f % 2)], [4, 15], [5, 15]].forEach(([x, y]) => px(x, y, yarn));
+      drawSwatch(px, yarn, ly + 1, 3, f);
+      px(7 + (f % 6), ly + 1, yarnLight); // the stitch being made
+      const k = f % 4 < 2; // needles take turns, so they click
+      const needle = '#e4e1f0', tip = '#ffffff';
+      for (let i = 0; i < 5; i++) { // a shadow under each needle, so it stands out against a light body
+        px(5 + i, ly + 2 - i - (k ? 1 : 0), yarnDark);
+        px(14 - i, ly + 2 - i - (k ? 0 : 1), yarnDark);
+      }
+      for (let i = 0; i < 5; i++) {
+        px(5 + i, ly + 1 - i - (k ? 1 : 0), i === 4 ? tip : needle);
+        px(14 - i, ly + 1 - i - (k ? 0 : 1), i === 4 ? tip : needle);
+      }
+      px(5, ly + 1 - (k ? 1 : 0), yarnLight); px(14, ly + 1 - (k ? 0 : 1), yarnLight); // coloured needle ends
+      if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
+      break;
+    }
+    case 'jump':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      // tying it in: holds the strand end up towards the braid
+      for (let i = 0, y = ly - 2; y >= -2; i++, y--) px(15 + (((i + f) % 4) < 2 ? 0 : 1), y, i % 2 ? yarn : yarnLight);
+      px(14, ly - 1, yarn); px(14, ly, yarnDark);
+      drawYarnBall(px, yarn, f % 3);
+      break;
+    default:
+      eyes(7, 12, ey, blink ? 1 : 2);
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      drawYarnBall(px, yarn, 0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+window.BraidSprites = { drawBlob, TASK_COLORS, KNOT, MOOD };
+})();
+
+  </script>
+  <script>
+  (function () {
+    var DUR = 5.538, B = 0.4615, LAG = 0.04;
+    var root = document.querySelector('[data-composition-id="07-rope"]');
+    var $ = function (id) { return document.getElementById(id); };
+    window.__timelines = window.__timelines || {};
+    var tl = gsap.timeline({ paused: true });
+
+    var SEG = 104, TOP = 28;
+    var KNOT = window.BraidSprites.KNOT, drawBlob = window.BraidSprites.drawBlob;
+
+    /* desks: start = when the chip flips to running (-1 = already), merge = beat the merge starts */
+    var D = {
+      schema: { color: '#ff7a90', fixed: true, cost: [[0, 0.31], [1, 0.31]] },
+      errors: { color: '#f5b942', fixed: true, cost: [[0, 0.22], [1, 0.22]] },
+      auth:   { color: '#3cc8b4', start: -1, merge: 0, cost: [[0, 0.39], [0.4, 0.54]], failedFirst: true },
+      docs:   { color: '#8fd14f', start: -1, merge: B, cost: [[0, 0.18], [0.5, 0.29]] },
+      routes: { color: '#9b7bff', start: 0.06, merge: 2 * B, cost: [[0.06, 0], [2 * B, 0.45]] },
+      tests:  { color: '#5aa9ff', start: 4 * B, merge: 6 * B, cost: [[4 * B, 0], [6 * B, 0.27]] },
+      sdk:    { color: '#ff9a4d', start: 4 * B, merge: 7 * B, cost: [[4 * B, 0], [7 * B, 0.24]] }
+    };
+    var IDS = ['schema', 'errors', 'auth', 'docs', 'routes', 'tests', 'sdk'];
+    var MERGES = [['auth', 0], ['docs', B], ['routes', 2 * B], ['tests', 6 * B], ['sdk', 7 * B]];
+    var ROPE = ['schema', 'errors', 'auth', 'docs', 'routes', 'tests', 'sdk'];
+
+    function lerp(arr, t) {
+      if (t <= arr[0][0]) return arr[0][1];
+      if (t >= arr[1][0]) return arr[1][1];
+      return arr[0][1] + (arr[1][1] - arr[0][1]) * (t - arr[0][0]) / (arr[1][0] - arr[0][0]);
+    }
+    function state(id, t) {
+      var d = D[id];
+      if (d.fixed) return { chip: 'done', mood: 'happy' };
+      if (t < d.start) return { chip: 'pending', mood: 'sleep' };
+      if (t < d.merge + LAG) return { chip: 'running', mood: 'work' };
+      if (t < d.merge + LAG + B) return { chip: 'done', mood: 'jump' };
+      return { chip: 'done', mood: 'happy' };
+    }
+
+    /* cached DOM refs */
+    var el = {};
+    IDS.forEach(function (id) {
+      var c = $('f07-blob-' + id);
+      el[id] = { canvas: c, ctx: c.getContext('2d'), chip: $('f07-chip-' + id), dots: $('f07-dots-' + id).children, cost: $('f07-cost-' + id), key: '', chipKey: '', dotKey: '' };
+    });
+    var knotCtx = $('f07-knot').getContext('2d'), knotKey = '';
+    var threadsEl = [].slice.call(document.querySelectorAll('.f07-thread'));
+    var THREADS = [['schema', 'routes'], ['auth', 'routes'], ['errors', 'routes'], ['schema', 'docs'], ['routes', 'tests'], ['routes', 'sdk']];
+    var mergedEl = $('f07-merged'), spendEl = $('f07-spend'), tailEl = $('f07-tail'), lastTail = '';
+    var lastMerged = '', lastSpend = '';
+
+    function doneAt(id) { return D[id].fixed ? -99 : D[id].merge + LAG; }
+    function startAt(id) { return D[id].fixed ? -99 : D[id].start; }
+
+    function render(t) {
+      var f = Math.floor(t * 8), spend = 0;
+      IDS.forEach(function (id) {
+        var s = state(id, t), e = el[id], d = D[id];
+        var k = s.mood + ':' + (s.mood === 'sleep' ? 0 : f);
+        if (k !== e.key) { e.key = k; drawBlob(e.ctx, d.color, s.mood, f, undefined); }
+        if (s.chip !== e.chipKey) { e.chipKey = s.chip; e.chip.className = 'f07-chip ' + s.chip; e.chip.textContent = s.chip; }
+        var cost = lerp(d.cost, t); if (s.chip === 'pending') cost = 0;
+        spend += cost;
+        var cs = '$' + cost.toFixed(2); if (e.cost.textContent !== cs) e.cost.textContent = cs;
+        /* attempt dots */
+        var a = [];
+        if (s.chip === 'pending') a = ['', '', ''];
+        else if (d.failedFirst) a = ['#ff6b6b', s.chip === 'running' ? '#6cb6ff' : '#3fcf8e', ''];
+        else a = [s.chip === 'running' ? '#6cb6ff' : '#3fcf8e', '', ''];
+        var dk = a.join('|');
+        if (dk !== e.dotKey) { e.dotKey = dk; for (var i = 0; i < 3; i++) { e.dots[i].style.background = a[i] || 'transparent'; e.dots[i].style.borderColor = a[i] || '#3a3e58'; } }
+      });
+      var ss = '$' + spend.toFixed(2); if (ss !== lastSpend) { lastSpend = ss; spendEl.textContent = ss; }
+
+      var merged = 2, rope = 2;
+      MERGES.forEach(function (m) { if (t >= m[1] + 0.2) merged++; if (t >= m[1]) rope++; });
+      var ms = merged + '/7'; if (ms !== lastMerged) { lastMerged = ms; mergedEl.textContent = ms; }
+      var rem = 7 - rope, tt = rem > 0 ? rem + (rem > 1 ? ' strands' : ' strand') + ' to go' : '';
+      if (tt !== lastTail) {
+        lastTail = tt; tailEl.textContent = tt; tailEl.style.display = rem > 0 ? 'block' : 'none';
+        tailEl.style.top = (196 + TOP + rope * SEG + 14) + 'px';
+      }
+
+      THREADS.forEach(function (p, i) {
+        var live = t >= Math.max(doneAt(p[0]), startAt(p[1])) && t < doneAt(p[1]);
+        var th = threadsEl[i];
+        if (live) { th.style.stroke = D[p[0]].color; th.style.strokeDasharray = '7 9'; th.style.strokeDashoffset = String(-(t * 60) % 16); }
+        else { th.style.stroke = '#3a3e58'; th.style.strokeDasharray = 'none'; th.style.strokeDashoffset = '0'; }
+      });
+
+      var kmood = t >= 8 * B ? 'happy' : 'work', kk = kmood + ':' + f;
+      if (kk !== knotKey) { knotKey = kk; drawBlob(knotCtx, KNOT.color, kmood, f, KNOT.tuft); }
+    }
+
+    /* driver: state readouts and sprites are pure functions of the timeline time */
+    tl.to({ t: 0 }, { t: DUR, duration: DUR, ease: 'none', onUpdate: function () { render(tl.time()); } }, 0);
+    render(0);
+
+    /* rope: a bead per merge, the strand draws as it lands, the dashed tail shortens */
+    MERGES.forEach(function (m, n) {
+      var i = 2 + n, T = m[1];
+      tl.fromTo('#f07-bead-' + i, { y: -44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.2, ease: 'power2.in' }, T);
+      tl.to('#f07-bead-' + i, { y: -10, duration: 0.09, ease: 'power2.out' }, T + 0.2);
+      tl.to('#f07-bead-' + i, { y: 0, duration: 0.1, ease: 'power2.in' }, T + 0.29);
+      tl.fromTo('.f07-seg-' + i, { strokeDashoffset: 1, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.3, ease: 'power1.out' }, T);
+      tl.fromTo('#f07-rl-' + i, { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.25, ease: 'power2.out' }, T + 0.1);
+      tl.to('#f07-tailrect', { attr: { y: TOP + (i + 1) * SEG }, duration: 0.3, ease: 'none' }, T);
+    });
+
+    /* scene 3: Knot is happy and says so, Merged pops once in accent, camera leans into the rope */
+    var S3 = 8 * B;
+    tl.fromTo('#f07-bubble', { opacity: 0, scale: 0.92 }, { opacity: 1, scale: 1, duration: 0.22, ease: 'back.out(1.2)' }, S3);
+    tl.to('#f07-merged', { color: '#b48cff', duration: 0.01 }, S3);
+    tl.fromTo('#f07-merged', { scale: 1 }, { scale: 1.22, duration: 0.14, ease: 'power2.out', transformOrigin: '0% 70%' }, S3);
+    tl.to('#f07-merged', { scale: 1, duration: 0.22, ease: 'power2.inOut' }, S3 + 0.14);
+    tl.to('#f07-floor', { opacity: 0.6, duration: 0.35, ease: 'power1.out' }, S3);
+    tl.fromTo('#f07-cam', { scale: 1 }, { scale: 1.08, duration: DUR - S3, ease: 'power1.inOut' }, S3);
+
+    window.__timelines['07-rope'] = tl;
+  })();
+  </script>
+</template>

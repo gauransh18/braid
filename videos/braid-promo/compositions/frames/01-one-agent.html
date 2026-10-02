@@ -1,0 +1,284 @@
+<template>
+  <style>
+    @font-face { font-family: "Pixelify Sans"; font-weight: 700; src: url("assets/pixelify-sans-latin-700-normal.woff2") format("woff2"); }
+    @font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("assets/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+    #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+    #root .clip { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+    #one-agent-bg { background-color: #12131c;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 2px, transparent 2px 12px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 2px, transparent 2px 12px); }
+    .one-agent-slot { position: absolute; top: 380px; width: 168px; height: 168px; box-sizing: border-box;
+      border: 2px dashed #3a3e58; border-radius: 12px; }
+    .one-agent-blob { position: absolute; top: 380px; width: 168px; height: 168px; image-rendering: pixelated; }
+    #one-agent-timer { position: absolute; left: 300px; top: 568px; width: 400px; height: 44px;
+      font-family: "JetBrains Mono", monospace; font-weight: 400; font-size: 30px; line-height: 44px; letter-spacing: 0.02em;
+      color: #9a9cb3; white-space: nowrap; }
+    #one-agent-timer b { font-weight: 400; color: #ecebf5; }
+    .one-agent-line { position: absolute; left: 0; top: 650px; width: 1920px; height: 150px; text-align: center;
+      font-family: "Pixelify Sans", monospace; font-weight: 700; font-size: 130px; line-height: 150px; letter-spacing: -0.03em;
+      color: #ecebf5; white-space: nowrap; }
+    .one-agent-line em { font-style: normal; color: #b48cff; }
+  </style>
+
+  <div data-hf-id="hf-ttch" id="root" data-composition-id="01-one-agent" data-start="0" data-duration="3.692" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-98iy" id="one-agent-bg" class="clip" data-start="0" data-duration="3.692" data-track-index="0"></div>
+    <div data-hf-id="hf-ty8s" id="one-agent-stage" class="clip" data-start="0" data-duration="3.692" data-track-index="1">
+      <div data-hf-id="hf-kmhf" class="one-agent-slot" style="left:492px"></div>
+      <div data-hf-id="hf-do8g" class="one-agent-slot" style="left:684px"></div>
+      <div data-hf-id="hf-t4d9" class="one-agent-slot" style="left:876px"></div>
+      <div data-hf-id="hf-fxun" class="one-agent-slot" style="left:1068px"></div>
+      <div data-hf-id="hf-fuqd" class="one-agent-slot" style="left:1260px"></div>
+      <div data-hf-id="hf-tyi4" class="one-agent-slot" style="left:1452px"></div>
+      <canvas data-hf-id="hf-6jg6" class="one-agent-blob" width="24" height="24" style="left:300px"></canvas>
+      <canvas data-hf-id="hf-22zg" class="one-agent-blob" width="24" height="24" style="left:492px"></canvas>
+      <canvas data-hf-id="hf-vtb5" class="one-agent-blob" width="24" height="24" style="left:684px"></canvas>
+      <canvas data-hf-id="hf-gt9i" class="one-agent-blob" width="24" height="24" style="left:876px"></canvas>
+      <canvas data-hf-id="hf-2eks" class="one-agent-blob" width="24" height="24" style="left:1068px"></canvas>
+      <canvas data-hf-id="hf-l4ru" class="one-agent-blob" width="24" height="24" style="left:1260px"></canvas>
+      <canvas data-hf-id="hf-qqwh" class="one-agent-blob" width="24" height="24" style="left:1452px"></canvas>
+      <div data-hf-id="hf-agul" id="one-agent-timer">elapsed <b data-hf-id="hf-936i" id="one-agent-time">0:00</b></div>
+      <div data-hf-id="hf-w9ft" class="one-agent-line" id="one-agent-l1">One <em data-hf-id="hf-skgs">agent</em>.</div>
+      <div data-hf-id="hf-uukc" class="one-agent-line" id="one-agent-l2">One <em data-hf-id="hf-x71a">task</em>.</div>
+      <div data-hf-id="hf-1237" class="one-agent-line" id="one-agent-l3">At a <em data-hf-id="hf-mb7q">time</em>.</div>
+    </div>
+  </div>
+
+  <script>
+/* braid sprites, copied from ui/index.html (drawBlob and helpers). Pure painters: call drawBlob(ctx, color, mood, f, tuft) on a 24x24 canvas. f = floor(t*8). */
+(function(){
+'use strict';
+
+/* ================= palette + sprites ================= */
+const TASK_COLORS = ['#ff7a90', '#3cc8b4', '#f5b942', '#9b7bff', '#5aa9ff', '#8fd14f', '#ff9a4d', '#e86bd0'];
+const KNOT = { color: '#b48cff', tuft: ['#ff7a90', '#3cc8b4', '#f5b942'] };
+const MOOD = { pending: 'sleep', running: 'work', resolving: 'inspect', verifying: 'inspect', reviewing: 'review', merging: 'jump', done: 'happy', failed: 'dead', blocked: 'tied', skipped: 'ghost', replanning: 'inspect', replaced: 'ghost' };
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mix(h, target, amt) {
+  const a = hexToRgb(h), b = target === 'black' ? [18, 16, 30] : [255, 255, 255];
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amt)).join(',')})`;
+}
+function grey(h) { const [r, g, b] = hexToRgb(h); const y = Math.round(r * .3 + g * .59 + b * .11); return '#' + [y, y, y].map(v => v.toString(16).padStart(2, '0')).join(''); }
+
+/** A ball of wool in the task's colour, bottom-left. `roll` turns the wrapped strands so it looks like it is unwinding. */
+function drawYarnBall(px, yarn, roll) {
+  const dark = mix(yarn, 'black', .4), light = mix(yarn, 'white', .5), cx = 1.5, cy = 18.5, r = 2.7;
+  for (let y = 15; y <= 22; y++) for (let x = -2; x <= 5; x++) {
+    const d = Math.hypot(x + .5 - cx, y + .5 - cy);
+    if (d > r) continue;
+    px(x, y, d > r - 1 ? dark : ((x + y + roll) % 3 === 0 ? light : yarn));
+  }
+}
+
+/** A little knitted swatch hanging in front of the agent: rows of stitches in two tones. `f` slides the pattern while it is being worked. */
+function drawSwatch(px, yarn, y0, rows, f, x0 = 7, x1 = 12) {
+  const light = mix(yarn, 'white', .45), dark = mix(yarn, 'black', .25);
+  for (let r = 0; r < rows; r++) {
+    const from = r === rows - 1 && rows > 2 ? x0 + 1 : x0, to = r === rows - 1 && rows > 2 ? x1 - 1 : x1;
+    for (let x = from; x <= to; x++) px(x, y0 + r, (x + r + f) % 2 ? yarn : light);
+    px(from, y0 + r, dark); px(to, y0 + r, dark);
+  }
+}
+
+/**
+ * 24x24 pixel blob (20x20 body art drawn at an offset, so there is room for wool). Original art drawn procedurally:
+ * a round body, a braided tuft on top, a face, and wool props that change with mood. The wool is the task's colour,
+ * the same colour its strand has in the braid. f = animation frame.
+ */
+function drawBlob(ctx, base, mood, f, tuft) {
+  const ink = '#12131c';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, 24, 24);
+  ctx.translate(2, 2);
+  const color = mood === 'ghost' ? grey(base) : base;
+  ctx.globalAlpha = mood === 'ghost' ? .5 : 1;
+  const px = (x, y, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); };
+
+  let rx = 6.5, ry = 5.5, cy = 12.5, bob = 0;
+  if (mood === 'work') bob = [0, -1, 0, 0][f % 4];
+  if (mood === 'jump') bob = [0, -2, -3, -2][f % 4];
+  if (mood === 'happy') bob = [0, -1][f % 2];
+  if (mood === 'sleep') { rx = 6.5 + (f % 8 < 4 ? .3 : 0); ry = 5.5 - (f % 8 < 4 ? .3 : 0); }
+  if (mood === 'dead') { rx = 8.2; ry = 3.2; cy = 15.5; }
+  cy += bob;
+
+  const inside = (x, y) => { const dx = (x + .5 - 10) / rx, dy = (y + .5 - cy) / ry; return dx * dx + dy * dy <= 1 && y <= 17; };
+  const edge = mix(color, 'black', .45), light = mix(color, 'white', .5);
+  let top = 20;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    if (!inside(x, y)) continue;
+    top = Math.min(top, y);
+    const border = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    px(x, y, border ? edge : color);
+  }
+  // shine
+  if (mood !== 'dead') { px(6, top + 2, light); px(7, top + 1, light); px(6, top + 1, light); }
+
+  // braided tuft: three rows zig-zagging in alternating strands
+  if (mood !== 'dead') {
+    const strands = tuft || [mix(color, 'white', .35), edge, color];
+    const sway = mood === 'work' || mood === 'jump' ? (f % 4 < 2 ? 0 : 1) : 0;
+    for (let k = 1; k <= 4; k++) {
+      const x = 9 + ((k + sway) % 2);
+      px(x, top - k, strands[k % strands.length]);
+      px(x === 9 ? 10 : 9, top - k, k === 4 ? strands[(k + 1) % strands.length] : 'transparent');
+    }
+    px(9, top - 5, strands[0]); px(11, top - 5, strands[1]); px(10, top - 5, strands[2]);
+  }
+
+  // face
+  const ey = Math.round(cy) - 1;
+  const ly = Math.round(cy) + 2; // where the hands are
+  const blink = f % 26 === 0;
+  const eyes = (lx, rx2, y, h = 2) => { for (let i = 0; i < h; i++) { px(lx, y + i, ink); px(rx2, y + i, ink); } };
+  const yarn = color, yarnDark = mix(color, 'black', .35), yarnLight = mix(color, 'white', .5);
+  switch (mood) {
+    case 'sleep':
+      px(6, ey + 1, ink); px(7, ey + 1, ink); px(12, ey + 1, ink); px(13, ey + 1, ink);
+      { const zy = 5 - Math.floor((f % 12) / 3); const zx = 15; ctx.globalAlpha *= .9;
+        [[0,0],[1,0],[2,0],[1,1],[0,2],[1,2],[2,2]].forEach(([a, b]) => px(zx + a, zy + b, 'rgba(140,140,170,.9)')); ctx.globalAlpha = mood === 'ghost' ? .5 : 1; }
+      // waiting: the ball of wool sits beside it, end trailing on the floor
+      drawYarnBall(px, yarn, 0);
+      [[4, 18], [5, 19], [6, 19], [7, 18]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'happy':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      if (f % 6 < 3) { px(3, top, '#ffe27a'); px(16, top + 1, '#ffe27a'); } else { px(2, top + 2, '#ffe27a'); px(17, top - 1, '#ffe27a'); }
+      // finished: a neat swatch with a fringe, and the ball tidy beside it
+      drawSwatch(px, yarn, ly, 4, 0, 6, 13);
+      [6, 8, 11, 13].forEach((x) => px(x, ly + 4, yarn));
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'dead':
+      [[6,0],[8,0],[7,1],[6,2],[8,2],[11,0],[13,0],[12,1],[11,2],[13,2]].forEach(([x, d]) => px(x, Math.round(cy) - 2 + d, ink));
+      // tangled: the strand has knotted itself all over it
+      for (let x = 3; x <= 17; x++) px(x, 12 + ((x * 7) % 5), (x % 2 ? yarn : yarnDark));
+      for (let x = 4; x <= 16; x += 3) { px(x, 11 + (x % 4), yarnLight); px(x + 1, 17, yarnDark); }
+      drawYarnBall(px, yarn, 1);
+      [[4, 17], [6, 16], [8, 17], [9, 15]].forEach(([x, y]) => px(x, y, yarn));
+      break;
+    case 'tied':
+      eyes(7, 12, ey + 1, 1); px(6, ey - 1, ink); px(13, ey - 1, ink);
+      // wrapped in its own wool: the strand it needs never arrived
+      for (let x = 3; x < 17; x++) if (inside(x, Math.round(cy) + 2)) px(x, Math.round(cy) + 2, x % 2 ? yarnDark : yarn);
+      for (let x = 4; x < 16; x++) if (inside(x, Math.round(cy) + 4)) px(x, Math.round(cy) + 4, x % 2 ? yarn : yarnDark);
+      px(16, Math.round(cy) + 1, yarnDark); px(17, Math.round(cy) + 3, yarn);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'inspect': {
+      const look = f % 8 < 4 ? 1 : 0;
+      eyes(7 + look, 12 + look, ey, blink ? 1 : 2);
+      // checking the stitches: the swatch in front, a magnifying glass over it
+      drawSwatch(px, yarn, ly, 3, 0);
+      [[14,7],[15,7],[16,7],[13,8],[17,8],[13,9],[17,9],[14,10],[15,10],[16,10]].forEach(([x, y]) => px(x, y + bob, '#c9c6d8'));
+      px(15, 8 + bob, 'rgba(160,210,255,.8)'); px(15, 9 + bob, 'rgba(160,210,255,.6)');
+      px(17, 11 + bob, '#8a6a4a'); px(18, 12 + bob, '#8a6a4a');
+      drawYarnBall(px, yarn, 0);
+      break;
+    }
+    case 'review':
+      eyes(7, 12, ey, blink ? 1 : 2);
+      for (let x = 5; x <= 14; x++) if (x !== 9 && x !== 10) px(x, ey - 1, ink);
+      px(5, ey, ink); px(9, ey, ink); px(10, ey, ink); px(14, ey, ink);
+      px(5, ey + 2, ink); px(9, ey + 2, ink); px(10, ey + 2, ink); px(14, ey + 2, ink);
+      px(9, ey - 1, ink); px(10, ey - 1, ink);
+      drawSwatch(px, yarn, ly + 1, 3, 0);
+      drawYarnBall(px, yarn, 0);
+      break;
+    case 'work': {
+      eyes(7, 12, ey + 1, blink ? 1 : 2);
+      // knitting: the ball unwinds, the strand runs up to two clicking needles, and a swatch grows below them
+      drawYarnBall(px, yarn, f % 3);
+      [[3, 16], [4, 16 - (f % 2)], [4, 15], [5, 15]].forEach(([x, y]) => px(x, y, yarn));
+      drawSwatch(px, yarn, ly + 1, 3, f);
+      px(7 + (f % 6), ly + 1, yarnLight); // the stitch being made
+      const k = f % 4 < 2; // needles take turns, so they click
+      const needle = '#e4e1f0', tip = '#ffffff';
+      for (let i = 0; i < 5; i++) { // a shadow under each needle, so it stands out against a light body
+        px(5 + i, ly + 2 - i - (k ? 1 : 0), yarnDark);
+        px(14 - i, ly + 2 - i - (k ? 0 : 1), yarnDark);
+      }
+      for (let i = 0; i < 5; i++) {
+        px(5 + i, ly + 1 - i - (k ? 1 : 0), i === 4 ? tip : needle);
+        px(14 - i, ly + 1 - i - (k ? 0 : 1), i === 4 ? tip : needle);
+      }
+      px(5, ly + 1 - (k ? 1 : 0), yarnLight); px(14, ly + 1 - (k ? 0 : 1), yarnLight); // coloured needle ends
+      if (f % 4 < 2) { px(16, top + 1, '#fff'); } else { px(3, top + 2, '#fff'); }
+      break;
+    }
+    case 'jump':
+      [[6,1],[7,0],[8,1],[11,1],[12,0],[13,1]].forEach(([x, d]) => px(x, ey + d, ink));
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      // tying it in: holds the strand end up towards the braid
+      for (let i = 0, y = ly - 2; y >= -2; i++, y--) px(15 + (((i + f) % 4) < 2 ? 0 : 1), y, i % 2 ? yarn : yarnLight);
+      px(14, ly - 1, yarn); px(14, ly, yarnDark);
+      drawYarnBall(px, yarn, f % 3);
+      break;
+    default:
+      eyes(7, 12, ey, blink ? 1 : 2);
+      px(9, ey + 3, ink); px(10, ey + 3, ink);
+      drawYarnBall(px, yarn, 0);
+  }
+  ctx.globalAlpha = 1;
+}
+
+window.BraidSprites = { drawBlob, TASK_COLORS, KNOT, MOOD };
+})();
+  </script>
+  <script>
+  (function () {
+    var DUR = 3.692, B = 0.4615;
+    window.__timelines = window.__timelines || {};
+    var tl = gsap.timeline({ paused: true });
+    var COLORS = window.BraidSprites.TASK_COLORS;
+    var canvases = Array.prototype.slice.call(document.querySelectorAll("#root .one-agent-blob"));
+    var slots = Array.prototype.slice.call(document.querySelectorAll("#root .one-agent-slot"));
+    var ctxs = canvases.map(function (c) { return c.getContext("2d"); });
+    function render(t) {
+      var f = Math.floor(t * 8);
+      for (var i = 0; i < 7; i++) window.BraidSprites.drawBlob(ctxs[i], COLORS[i], i === 0 ? "work" : "sleep", f + i * 3, null);
+    }
+    render(0);
+
+    // Scene 1: the working blob lands on the downbeat, empty outlines already waiting
+    tl.fromTo(canvases[0], { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.18, ease: "power3.out", immediateRender: true }, 0);
+    tl.fromTo(slots, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "none", stagger: 0.03, immediateRender: true }, 0.05);
+
+    // Scene 2: six sleepers pop in left to right, timer appears
+    for (var i = 1; i < 7; i++) {
+      var at = B + (i - 1) * 0.07;
+      tl.fromTo(canvases[i], { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.14, ease: "power3.out", immediateRender: true }, at);
+      tl.set(slots[i - 1], { opacity: 0 }, at);
+    }
+    tl.fromTo("#one-agent-timer", { opacity: 0 }, { opacity: 1, duration: 0.1, ease: "none", immediateRender: true }, B);
+
+    // Punchline hard swaps on the beats
+    var lines = ["#one-agent-l1", "#one-agent-l2", "#one-agent-l3"];
+    var starts = [2 * B, 4 * B, 6 * B];
+    lines.forEach(function (sel, k) {
+      tl.set(sel, { opacity: 0 }, 0);
+      tl.set(sel, { opacity: 1 }, starts[k]);
+      if (k < 2) tl.set(sel, { opacity: 0 }, starts[k + 1]);
+    });
+    tl.fromTo("#one-agent-l1", { y: 14 }, { y: 0, duration: 0.12, ease: "power2.out", immediateRender: false }, starts[0]);
+
+    // Timer ticks on the beats
+    var el = document.getElementById("one-agent-time");
+    tl.call(function () { el.textContent = "0:00"; }, null, 0);
+    [["0:07", 2 * B], ["0:19", 4 * B], ["0:42", 6 * B]].forEach(function (p) {
+      tl.call(function () { el.textContent = p[0]; }, null, p[1]);
+    });
+    // seek-safe backup for the timer text (derived from time, not events)
+    var proxy = { t: 0 };
+    tl.to(proxy, { t: DUR, duration: DUR, ease: "none", onUpdate: function () {
+      var t = tl.time();
+      render(t);
+      el.textContent = t >= 6 * B ? "0:42" : t >= 4 * B ? "0:19" : t >= 2 * B ? "0:07" : "0:00";
+    } }, 0);
+
+    window.__timelines["01-one-agent"] = tl;
+  })();
+  </script>
+</template>

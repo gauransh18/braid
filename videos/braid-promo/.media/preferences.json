@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "preferences": {
+    "destination": {
+      "value": "youtube",
+      "confirmed_in": [
+        "braid-promo"
+      ],
+      "updated_at": "2026-10-02T06:51:59.939Z"
+    },
+    "aspect": {
+      "value": "1920x1080",
+      "confirmed_in": [
+        "braid-promo"
+      ],
+      "updated_at": "2026-10-02T06:51:59.971Z"
+    },
+    "language": {
+      "value": "en",
+      "confirmed_in": [
+        "braid-promo"
+      ],
+      "updated_at": "2026-10-02T06:52:00.000Z"
+    },
+    "flow": {
+      "value": "automation",
+      "confirmed_in": [
+        "braid-promo"
+      ],
+      "updated_at": "2026-10-02T06:52:00.026Z"
+    },
+    "storyboard": {
+      "value": "no",
+      "confirmed_in": [
+        "braid-promo"
+      ],
+      "updated_at": "2026-10-02T06:52:00.052Z"
+    }
+  },
+  "sightings": {}
+}

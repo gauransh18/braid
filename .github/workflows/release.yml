@@ -1,6 +1,6 @@
 # Builds the command-line executables and publishes them, but only after the exact files that would be published
 # pass an end-to-end smoke test on real machines: Windows (x64 and ARM), Linux and macOS.
-# Trigger: push a tag like v0.3.0. The Windows installer is built here; the Mac app (.dmg) is built locally and attached by hand.
+# Trigger: push a tag like v0.4.0. The Windows installer is built here; the Mac app (.dmg) is built locally and attached by hand.
 name: release
 on:
   push:

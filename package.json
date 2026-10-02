@@ -1,6 +1,6 @@
 {
   "name": "braid",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Headless multi-agent harness: plan a task graph, run coding agents in isolated git worktrees, verify, review and merge.",
   "type": "module",
   "bin": {

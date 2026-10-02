@@ -214,7 +214,7 @@ The dashboard shows:
 - **Activity:** every harness event (verify results, review verdicts, conflicts, rollbacks).
 - **Git branches:** a switch beside the braid. For each task branch: its commits, a diffstat, and whether it is already in the integration branch. Read-only.
 - **History:** the whole repo's commit graph across every local branch, remote-tracking branch and tag. **Fetch from GitHub** needs `--control` (or the app) and runs `git fetch --all`, which adds objects and moves remote-tracking branches such as `origin/main`. It never touches a local branch or your working tree, and prunes nothing.
-- **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
+- **Inspector:** click a desk to see the task prompt, which agent and model worked on it (the model the agent actually ran with, also when braid or the CLI chose it), its checks and the live agent transcript for each attempt.
 - **Knot:** the mascot, which narrates what the run is doing.
 
 <p align="center">

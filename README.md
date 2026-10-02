@@ -15,7 +15,36 @@ Your branches are never touched. Work lands on `braid/<runId>/integration`.
 - **Bounded.** Every agent call has a time limit, every task a token allowance, and provider trouble (rate limits, outages) is retried without costing the task an attempt.
 - **Finishable.** `braid pr` opens a pull request for a run, and `braid clean` removes what runs leave behind.
 
-Contents: [Install](#install) · [Use](#use) · [Desktop app](#desktop-app-macos-and-windows) · [Watch it live](#watch-it-live) · [Plan format](#plan-format) · [Stopping and limits](#stopping-and-limits) · [Open a pull request](#open-a-pull-request) · [Clean up](#clean-up) · [Sandbox](#sandbox) · [Where things live](#where-things-live) · [Environment](#environment) · [Develop](#develop) · [Verified where](#verified-where)
+<p align="center">
+  <img src="docs/images/dashboard-running.png" alt="The braid dashboard in the middle of a run: seven agents on a floor, one strand already tied into the integration branch, three at work" width="900">
+</p>
+
+<p align="center"><sub>The dashboard in the middle of a run. One strand is already tied into the integration branch; others are being knitted, checked, or untangled after a merge conflict. This is <code>braid demo</code>: scripted agents, nothing is spent.</sub></p>
+
+Contents: [How it works](#how-it-works) · [Install](#install) · [Use](#use) · [Desktop app](#desktop-app-macos-and-windows) · [Watch it live](#watch-it-live) · [Plan format](#plan-format) · [Stopping and limits](#stopping-and-limits) · [Open a pull request](#open-a-pull-request) · [Clean up](#clean-up) · [Sandbox](#sandbox) · [Where things live](#where-things-live) · [Environment](#environment) · [Develop](#develop) · [Verified where](#verified-where)
+
+## How it works
+
+```mermaid
+flowchart LR
+  plan["plan.json<br/>a goal and a graph of tasks"] --> sched["Scheduler<br/>dependencies, concurrency,<br/>touches, limits"]
+  sched --> wt["Worktree and branch<br/>from the latest integration head"]
+  wt --> agent["Agent<br/>Claude Code, Codex,<br/>Gemini CLI or NVIDIA NIM"]
+  agent --> verify{"Your checks<br/>pass?"}
+  verify -- "no: retry with the output" --> agent
+  verify -- yes --> review{"Reviewer<br/>approves?<br/>(optional)"}
+  review -- "no: retry with the issues" --> agent
+  review -- yes --> merge["Merge into<br/>braid/ID/integration"]
+  merge -- conflict --> resolver["Resolver agent<br/>keeps both sides"]
+  resolver --> verify
+  merge --> combined{"Checks pass on<br/>the merged tree?"}
+  combined -- "no: roll the merge back,<br/>fix on top" --> agent
+  combined -- yes --> done["Integration branch:<br/>only verified states"]
+```
+
+Tasks run in parallel up to `concurrency`, each in its own worktree, and a task starts only when everything it depends on has
+been merged. Merges happen one at a time. Your branches and your working tree are never written to: you review
+`braid/<runId>/integration` and merge it yourself, or open a pull request for it with `braid pr`.
 
 ## Install
 
@@ -92,6 +121,35 @@ tasks that succeeded) and `--watch`. The first six override the plan field of th
 | `braid doctor` | Check that git and an agent CLI are installed |
 | `braid models <provider>`, `braid test-provider <provider>` | List a provider's models; check its key, reachability and model |
 
+`braid run` prints each step as it happens. This is an excerpt of a real run (`braid demo`, with scripted agents): three tasks start at
+once, one fails its check and is retried, one merges, one hits a merge conflict that a resolver agent untangles without redoing the
+task, and a reviewer sends one task back before approving it.
+
+```text
+07:51:56 run started on main; integration branch braid/20261002-075156-dw7w/integration
+07:51:56 [errors] running
+07:51:56 [auth] running
+07:51:56 [schema] running
+07:52:02 [auth] verify (task) `node check.js` -> fail (1)
+07:52:02 [auth] running
+07:52:03 [schema] verify (task) `node check.js` -> pass
+07:52:03 [schema] merge -> ok
+07:52:03 [schema] verify (integration) `node check.js` -> pass
+07:52:03 [schema] done
+07:52:03 [errors] merge -> conflict
+07:52:03 [errors] pulled latest integration: conflicts in shared.txt
+07:52:03 [errors] resolving
+07:52:07 [errors] conflicts resolved
+  ...
+07:52:18 [routes] review -> changes requested: DELETE /notes/:id does not check the note owner; PATCH accepts unknown fields
+07:52:18 [routes] running
+07:52:30 [routes] review -> approved
+07:52:30 [routes] merge -> ok
+07:52:30 [routes] verify (integration) `node check.js` -> pass
+  ...
+07:52:37 run done; 948k tok
+```
+
 Press Ctrl-C to stop the agents. Work already merged stays on the integration branch.
 
 To continue an interrupted or failed run, keep the merged work and retry the rest:
@@ -103,6 +161,14 @@ braid resume [runId]   # defaults to the newest unfinished run
 ## Desktop app (macOS and Windows)
 
 `npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. Needs Rust, Bun and the Tauri CLI (`cargo install tauri-cli --version "^2" --locked`). Output is in `desktop/src-tauri/target/release/bundle/`. The app is unsigned, so macOS will warn on other people's machines.
+
+<p align="center">
+  <img src="docs/images/desktop-launcher.png" alt="The launcher window: Open Repository, Watch a demo run, and a list of recent repositories" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/images/desktop-settings.png" alt="The Settings window: one card per agent with its installed version, model, API key and a Test connection button" width="300">
+</p>
+
+<p align="center"><sub>The launcher and Settings windows. The repositories and the agents they list are sample data.</sub></p>
 
 - **Launcher.** The app opens a small launcher window, not an empty dashboard: **Open Repository...**, **Watch a demo run** (mock agents, nothing spent) and a list of recent repositories. Picking one opens a dashboard window for it, with the single-file braid executable running in the background as that repository's server.
 - **Several repositories.** **File > Open Repository...** (Cmd+O) switches the current window to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository.
@@ -135,7 +201,12 @@ after the URL; it never travels in argv or the request URL), and they refuse req
 this way lives in the `braid watch` process: stopping that process with Ctrl-C stops the run and saves it, so `braid resume`
 can continue it. Closing or reloading the page while a plan is being drafted stops the planner agent (there is no cancel
 button yet). Reading runs and transcripts does not need the token.
-It shows:
+
+<p align="center">
+  <img src="docs/images/guided-start.png" alt="The guided start: a goal, the check command every task must pass, a Draft a plan button, and which agents are available" width="640">
+</p>
+
+The dashboard shows:
 
 - **The floor:** each agent is a pixel blob that **knits a strand of wool** in its task's colour, and its mood shows what it is doing: a ball of wool waiting beside it, needles clicking over a growing swatch while it works, a magnifier while its stitches are checked (your tests), glasses while a reviewer looks, jumping while it ties the strand into the braid, a fringed swatch when done, tangled wool when failed, wrapped in its own wool when blocked. Under each name a plain sentence says what it is doing or what it is waiting for (including "Waiting for X: it changes the same files" when `touches` holds a task back), columns are numbered steps, and dependencies are strands of wool that thin out until the first agent finishes, turn solid when it has, and twist through while the next agent works.
 - **The braid:** the integration branch drawn as a rope that gains a strand in the task's color on every verified merge.
@@ -145,6 +216,26 @@ It shows:
 - **History:** the whole repo's commit graph across every local branch, remote-tracking branch and tag. **Fetch from GitHub** needs `--control` (or the app) and runs `git fetch --all`, which adds objects and moves remote-tracking branches such as `origin/main`. It never touches a local branch or your working tree, and prunes nothing.
 - **Inspector:** click a desk to see the task prompt, its checks and the live agent transcript for each attempt.
 - **Knot:** the mascot, which narrates what the run is doing.
+
+<p align="center">
+  <img src="docs/images/dashboard-done.png" alt="A finished run: every strand is tied into the braid and a banner says to review the integration branch and merge it" width="900">
+</p>
+
+<p align="center"><sub>A finished run: all seven strands are in the braid, and the banner gives the branch to review and a button that copies the merge command.</sub></p>
+
+<p align="center">
+  <img src="docs/images/dashboard-inspector.png" alt="The inspector open on one task: its prompt, its checks and the agent's transcript for each attempt" width="900">
+</p>
+
+<p align="center"><sub>The inspector: click a desk to read the task, the checks and merge steps it has been through, and the agent's transcript for each attempt (here, an agent untangling a merge conflict).</sub></p>
+
+<p align="center">
+  <img src="docs/images/dashboard-branches.png" alt="The Git branches view: each task branch with its commits and whether it is in the integration branch" width="440">
+  &nbsp;
+  <img src="docs/images/dashboard-history.png" alt="The History view: the whole repository's commit graph across every branch" width="440">
+</p>
+
+<p align="center"><sub>The Git branches view (left) and the History view (right).</sub></p>
 
 ## Plan format
 
@@ -200,6 +291,22 @@ need it for the rest of the run, the way an agent out of credit does; `braid res
   - **Whole run.** `budgetTokens` in the plan (or `--budget-tokens N`) is a separate, optional cap on the run. It has no default. When it is set, the run starts no new task or attempt once it has used that many tokens since this `braid run` or `braid resume`; a call that is already running finishes. `budgetTokens: 0` removes only this cap, not the per-task allowance. A run with many tasks can use more than 3 million tokens in all.
   - **Caveats.** A call that is killed counts only the tokens known for it. Claude Code and Codex stream their figures, so most of what it used is seen. Gemini reports only at the end: for a Gemini call that is stopped, or that ends without a successful result, braid estimates the tokens from what streamed (about 4 characters per token; reasoning tokens and the CLI's own prompt never stream, so the real figure is higher). A Gemini call that succeeds but reports no usage counts 0, on purpose, so that the canary can see the CLI changed. NIM and other OpenAI-compatible endpoints that report no cached tokens: only the part of the conversation that is new since the previous turn counts as fresh input, and the rest as cached. That is an approximation.
 - **No terminal.** Setup, verify and agents run without a controlling terminal, so a prompt for a git password, an ssh passphrase, `sudo` or a gpg passphrase fails instead of asking. Use a credential helper or a key. When a failing setup or verify command printed such a failure, the report (on the dashboard, and in the agent's next prompt) ends with a line starting `Hint: braid runs this command without a terminal` that says what to do.
+
+### What a stopped run looks like
+
+When a run stops short, the dashboard says why and what to do next. These are real runs, written by the orchestrator with a scripted agent.
+
+<p align="center">
+  <img src="docs/images/stop-tokens.png" alt="Banner: one task used up its token allowance; the other tasks carried on; resume gives each unfinished task a fresh allowance" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/stop-usage.png" alt="Banner: the agent is out of usage or credit; resume carries on once the account has usage again" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/stop-tangled.png" alt="Banner: one strand got tangled because its checks failed; two tasks could not start because they depend on it" width="900">
+</p>
 
 ## Open a pull request
 
@@ -304,6 +411,7 @@ cargo test --manifest-path desktop/src-tauri/Cargo.toml   # the desktop app's Ru
 node scripts/canary.mjs --fake   # the canary against stand-in agents, no network
 ```
 
+- **Screenshots.** The images in `docs/images/` come from `node scripts/screenshots.mjs` (`npm run screenshots`), which needs Google Chrome (or `BRAID_CHROME`) and a built braid. The dashboard shots are of a real `braid demo` run and of real runs that the orchestrator wrote with a scripted agent; the desktop launcher and Settings are the app's own pages with sample data standing in for the Tauri commands. `--only name,name` redoes some of them.
 - **Editor.** `.editorconfig` sets 2 spaces, LF and a final newline (4 spaces for Rust and Python).
 - **CI** (`.github/workflows/ci.yml`) runs `npm test`, the binary build and `scripts/smoke.mjs` on Linux, Windows and macOS on every push, and the desktop app's Rust tests on macOS (job `desktop-rust`; Windows runs them in `desktop-windows.yml`, after the app is built). The macOS Rust job runs on every push and pull request, because one job in a workflow cannot have its own path filter; `rust-cache` keeps it cheap. `tauri-build` needs the sidecar file `desktop/src-tauri/binaries/braid-<rust host triple>` to exist, even as an empty file, so create one before running `cargo test` yourself.
 - **The dashboard script** (`ui/index.html`) is checked by `test/ui.test.ts`: every inline script is syntax-checked, and its functions run against run states that the real orchestrator wrote. The page matches the orchestrator's wording for the token limits and for an agent out of usage (`token budget exhausted`, `agent unavailable: usage or credit limit reached`), so changing that text in `src/orchestrator.ts` or `src/failures.ts` fails a test until the page is changed with it.

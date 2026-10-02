@@ -1,11 +1,21 @@
 # braid
 
+[![ci](https://github.com/gauransh18/braid/actions/workflows/ci.yml/badge.svg)](https://github.com/gauransh18/braid/actions/workflows/ci.yml)
+
 A multi-agent coding harness for small teams. It breaks a goal into a graph of tasks, runs each task
-with a coding agent (Claude Code, Codex) in its own git worktree, and checks the result before
-merging it. The checks are your tests, an optional reviewer agent, and your tests again on the
-merged tree.
+with a coding agent (Claude Code, Codex, Gemini CLI, or a model on NVIDIA NIM) in its own git worktree, and checks the result
+before merging it. The checks are your tests, an optional reviewer agent, and your tests again on the merged tree.
 
 Your branches are never touched. Work lands on `braid/<runId>/integration`.
+
+- **Isolated.** Every task gets its own worktree and branch, started from everything already merged. Agents get no shell unless you allow it, and a container sandbox is available.
+- **Checked.** A task is merged only when its own checks pass, a reviewer (optionally a different agent) approves, and the checks pass again on the merged tree. A merge that breaks the tree is rolled back.
+- **Recoverable.** Conflicts are resolved by a narrow agent that keeps both sides. Stop at any time and `braid resume` keeps the merged work and retries the rest.
+- **Watchable.** A live dashboard (and a macOS and Windows desktop app) shows every agent, check and merge as it happens.
+- **Bounded.** Every agent call has a time limit, every task a token allowance, and provider trouble (rate limits, outages) is retried without costing the task an attempt.
+- **Finishable.** `braid pr` opens a pull request for a run, and `braid clean` removes what runs leave behind.
+
+Contents: [Install](#install) · [Use](#use) · [Desktop app](#desktop-app-macos-and-windows) · [Watch it live](#watch-it-live) · [Plan format](#plan-format) · [Stopping and limits](#stopping-and-limits) · [Open a pull request](#open-a-pull-request) · [Clean up](#clean-up) · [Sandbox](#sandbox) · [Where things live](#where-things-live) · [Environment](#environment) · [Develop](#develop) · [Verified where](#verified-where)
 
 ## Install
 
@@ -15,7 +25,7 @@ npm run build
 npm link   # puts `braid` on PATH
 ```
 
-You need Node 22 or later, git, and at least one agent CLI signed in (`claude`, optionally `codex` or `gemini`).
+You need Node 22 or later, git, and at least one agent: a signed-in CLI (`claude`, `codex` or `gemini`) or an NVIDIA API key for the `nim` agent.
 Run `braid doctor` to see what is missing and how to install it.
 
 ### Windows
@@ -70,6 +80,18 @@ braid clean --dry-run
 tasks that succeeded) and `--watch`. The first six override the plan field of the same meaning for that run (see
 [Plan format](#plan-format)).
 
+| Command | What it does |
+| --- | --- |
+| `braid plan "<goal>"` | Draft a plan from a goal with a read-only agent; edit it before running |
+| `braid run <plan.json>` | Run a plan |
+| `braid resume [runId]` | Continue an interrupted or failed run |
+| `braid status [runId]`, `braid runs` | Show one run, or list all runs |
+| `braid watch [--control]`, `braid demo` | The dashboard for this repo's runs, with or without buttons to start, stop and resume; a scripted demo run |
+| `braid pr [runId]` | Push a run's integration branch and open a pull request ([details](#open-a-pull-request)) |
+| `braid clean` | Remove the worktrees and branches that finished runs leave ([details](#clean-up)) |
+| `braid doctor` | Check that git and an agent CLI are installed |
+| `braid models <provider>`, `braid test-provider <provider>` | List a provider's models; check its key, reachability and model |
+
 Press Ctrl-C to stop the agents. Work already merged stays on the integration branch.
 
 To continue an interrupted or failed run, keep the merged work and retry the rest:
@@ -80,24 +102,19 @@ braid resume [runId]   # defaults to the newest unfinished run
 
 ## Desktop app (macOS and Windows)
 
-`npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. It opens a small
-**launcher** window, not an empty dashboard: **Open Repository...**, **Watch a demo run** (mock agents, nothing spent) and
-a list of recent repositories. Picking one opens a dashboard window for it, with the single-file braid executable
-running in the background as that repository's server. **File > Open Repository...** (Cmd+O) switches the current window
-to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories
-at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu.
-**Braid > Settings...** (Cmd+,; on Windows: File > Settings) manages the agents: which of Claude Code, Codex and Gemini CLI are installed, plus **NVIDIA NIM** (a hosted API: add an `nvapi-` key and pick a model; braid runs the agent loop itself) (with install commands for the ones that are not), which is the default, which model each uses (type any name, or pick from a current list, which Braid refreshes every time it starts and on **Refresh list**: the provider's own live list when you saved a key, otherwise the model names read from the installed Claude Code, Codex or Gemini CLI itself (they follow the CLI when you update it); the Claude aliases `opus`, `sonnet` and `haiku` always mean the newest), and optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in. Each agent has an **Enabled** switch: a switched-off agent is never used as the default, and a plan that asks for it is refused with a clear message. Each provider card has a **Test connection** button (key, reachability, the chosen model and, for NIM, tool calling). Changes apply to new runs in every window at once. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository. Closing a window stops its server,
-and the last window hides to the menu bar, whose icon shows how many runs are active (**Quit Braid** really quits). The app
-does not kill a server that is running something: it writes `quit` to the server's standard input, which the server treats
-like a first Ctrl-C (agents stopped, merged work kept, the run saved so **Resume** works), and it kills the server only if
-it is still there 20 seconds later. A server whose input closes (the app was killed or crashed) stops the same way. Closing
-a window does this in the background; **Quit Braid** waits for every server, so it can take a few seconds to exit while a run
-winds down (agents usually stop at once; a command that ignores SIGTERM takes about 5 seconds). The demo server, and a server that never came up, are killed at once. macOS
-notifications announce a finished, failed or stopped run and each task that fails, but only while no window is focused (the
-first launch asks for notification permission). Needs Rust, Bun and the Tauri CLI
-(`cargo install tauri-cli --version "^2" --locked`). Output is in `desktop/src-tauri/target/release/bundle/`. The app is
-unsigned, so macOS will warn on other people's machines. Starting runs works from the window (**New run**); you can also
-start them with `braid run` and the window shows them live.
+`npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. Needs Rust, Bun and the Tauri CLI (`cargo install tauri-cli --version "^2" --locked`). Output is in `desktop/src-tauri/target/release/bundle/`. The app is unsigned, so macOS will warn on other people's machines.
+
+- **Launcher.** The app opens a small launcher window, not an empty dashboard: **Open Repository...**, **Watch a demo run** (mock agents, nothing spent) and a list of recent repositories. Picking one opens a dashboard window for it, with the single-file braid executable running in the background as that repository's server.
+- **Several repositories.** **File > Open Repository...** (Cmd+O) switches the current window to another repository, and **File > New Window** (Cmd+N) brings up the launcher again so you can watch several repositories at once, each with its own window and server. Both are also in the Dock icon's right-click menu and the menu-bar icon's menu. `Braid --repo PATH --repo PATH2` skips the launcher and opens one window per repository.
+- **Starting runs.** From the window (**New run**), or with `braid run`: the window shows them live.
+- **Settings** (**Braid > Settings...**, Cmd+,; on Windows: File > Settings) manages the agents:
+  - Which of Claude Code, Codex and Gemini CLI are installed (with install commands for the ones that are not), plus **NVIDIA NIM**, a hosted API: add an `nvapi-` key and pick a model, and braid runs the agent loop itself.
+  - Which agent is the default and which model each uses. Type any name, or pick from a current list, which Braid refreshes every time it starts and on **Refresh list**: the provider's own live list when you saved a key, otherwise the model names read from the installed Claude Code, Codex or Gemini CLI itself (they follow the CLI when you update it). The Claude aliases `opus`, `sonnet` and `haiku` always mean the newest.
+  - Optional provider API keys. Keys go in the macOS Keychain (Windows Credential Manager on Windows), never in a file, and the window can only show that one is set. They are passed to agents only through the environment of the running server. Leave a key empty to use the CLI's own sign-in.
+  - An **Enabled** switch per agent: a switched-off agent is never used as the default, and a plan that asks for it is refused with a clear message.
+  - A **Test connection** button per provider (key, reachability, the chosen model and, for NIM, tool calling). Changes apply to new runs in every window at once.
+- **Closing and quitting.** Closing a window stops its server, and the last window hides to the menu bar, whose icon shows how many runs are active (**Quit Braid** really quits). The app does not kill a server that is running something: it writes `quit` to the server's standard input, which the server treats like a first Ctrl-C (agents stopped, merged work kept, the run saved so **Resume** works), and it kills the server only if it is still there 20 seconds later. A server whose input closes (the app was killed or crashed) stops the same way. Closing a window does this in the background; **Quit Braid** waits for every server, so it can take a few seconds to exit while a run winds down (agents usually stop at once; a command that ignores SIGTERM takes about 5 seconds). The demo server, and a server that never came up, are killed at once.
+- **Notifications.** macOS notifications announce a finished, failed or stopped run and each task that fails, but only while no window is focused (the first launch asks for notification permission).
 
 ## Watch it live
 

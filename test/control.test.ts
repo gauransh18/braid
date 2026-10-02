@@ -201,6 +201,13 @@ describe('control endpoints', () => {
     assert.equal((await authed(server, 'POST', '/api/run/20200101-000000-zzzz/resume', {})).status, 404);
   });
 
+  it('says which agent could not draft a plan, and why', async () => {
+    script = () => ({ ok: false, text: 'the model is overloaded today' });
+    const res = await authed(server, 'POST', '/api/plan-draft', { goal: 'do it', verify: ['npm test'], driver: 'mock' });
+    assert.equal(res.status, 502);
+    assert.match(res.json.error, /^The mock agent could not draft a plan: the model is overloaded today/);
+  });
+
   it('drafts a plan from a goal', async () => {
     script = () => ({ text: JSON.stringify({ goal: 'do it', tasks: [{ id: 'one', title: 'One', prompt: 'p' }] }) });
     const res = await authed(server, 'POST', '/api/plan-draft', { goal: 'do it', verify: ['npm test'], driver: 'mock' });

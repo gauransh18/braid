@@ -26,6 +26,20 @@ export interface OpenAICompatConfig {
   retryDelayMs?: number;
   /** How long one request may take before it is abandoned. Default 180 s. */
   requestTimeoutMs?: number;
+  /**
+   * Most tokens one reply may have. Sent on every request, because a hosted endpoint's own default is small (NVIDIA's
+   * can cut a drafted plan off in the middle of its JSON). Halved and retried when the endpoint says it is too many.
+   */
+  maxTokens?: number;
+}
+
+/** Reasoning models put their thinking in the reply as <think>...</think> (or only the closing tag); the answer is what follows. */
+export function stripThinking(text: string, trim = true): string {
+  let t = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const close = t.lastIndexOf('</think>');
+  if (close >= 0) t = t.slice(close + '</think>'.length);
+  t = t.replace(/<think>[\s\S]*$/i, '');
+  return trim ? t.trim() : t;
 }
 
 /**
@@ -78,6 +92,9 @@ export class OpenAICompatDriver implements Driver {
       }
     }
     let switched = false;
+    /** An answer that the reply limit cut off, and how many times it has been asked to go on. */
+    let carry = '';
+    let continuations = 0;
     const tools = toolsFor(opts);
     const messages: any[] = [
       { role: 'system', content: systemPrompt(opts.canEdit, tools.some((t) => t.function.name === 'run_command')) },
@@ -91,9 +108,14 @@ export class OpenAICompatDriver implements Driver {
 
     for (let turn = 1; turn <= maxTurns; turn++) {
       if (opts.signal?.aborted) return finish(false, 'aborted', usage, model);
+      // The last turn takes away the tools and says so: a model that has been reading files all along (a planner in a big
+      // repository, say) must then answer with what it has, instead of the run ending with no answer at all.
+      const lastTurn = turn === maxTurns && maxTurns > 1;
+      if (lastTurn) messages.push({ role: 'user', content: 'You have used almost all of your turns. Do not call any more tools. Give your final answer now, with what you have found.' });
+      const useTools = tools.length > 0 && !lastTurn;
       let reply: any;
       try {
-        reply = await this.chat(key, { model, messages, tools: tools.length ? tools : undefined, tool_choice: tools.length ? 'auto' : undefined, temperature: 0.2 }, opts.signal);
+        reply = await this.chat(key, { model, messages, tools: useTools ? tools : undefined, tool_choice: useTools ? 'auto' : undefined, temperature: 0.2, max_tokens: this.cfg.maxTokens ?? 8192 }, opts.signal);
       } catch (err) {
         // The service took the model down since it was chosen (usually a name saved in Settings long ago): use one that
         // works instead of failing every run, and say so, once.
@@ -127,11 +149,27 @@ export class OpenAICompatDriver implements Driver {
       } else seen = undefined;
       const message = reply.choices?.[0]?.message;
       if (!message) return finish(false, `${label} returned no message: ${JSON.stringify(reply).slice(0, 300)}`, usage, model);
-      if (typeof message.content === 'string' && message.content.trim()) emit({ kind: 'text', text: message.content });
-      messages.push({ role: 'assistant', content: message.content ?? null, ...(message.tool_calls?.length ? { tool_calls: message.tool_calls } : {}) });
+      // Untrimmed, so that the pieces of an answer that was cut off join without losing a space at the seam.
+      const spoken = stripThinking(typeof message.content === 'string' ? message.content : '', false);
+      const said = spoken.trim();
+      if (said) emit({ kind: 'text', text: said });
+      messages.push({ role: 'assistant', content: spoken || null, ...(message.tool_calls?.length ? { tool_calls: message.tool_calls } : {}) });
 
       const calls: any[] = message.tool_calls ?? [];
-      if (!calls.length) return finish(true, String(message.content ?? '').trim(), usage, model);
+      if (!calls.length) {
+        const why = String(reply.choices?.[0]?.finish_reason ?? '');
+        if (why === 'length') {
+          // The reply hit the output limit. A plan or a review is JSON that is useless cut in half, so ask the model to
+          // carry on, a few times, and join the pieces.
+          if (continuations++ >= 4) return finish(false, `${label}'s answer kept hitting the reply limit (${this.cfg.maxTokens ?? 8192} tokens) and is still not finished. Pick a model that answers more briefly in Braid > Settings.`, usage, model);
+          carry += spoken;
+          messages.push({ role: 'user', content: 'Your answer was cut off at the output limit. Continue exactly where it stopped. Do not repeat anything and do not add commentary.' });
+          continue;
+        }
+        const answer = (carry + spoken).trim();
+        if (!answer) return finish(false, `${label} answered with nothing${why ? ` (finish reason: ${why})` : ''}. A model that thinks at length can use up the whole reply limit before it writes its answer; pick another model in Braid > Settings.`, usage, model, true);
+        return finish(true, answer, usage, model);
+      }
 
       for (const call of calls) {
         const name = String(call.function?.name ?? '');
@@ -198,6 +236,13 @@ export class OpenAICompatDriver implements Driver {
         throw new RetiredModelError(gone, `${label} has retired the model ${gone} (HTTP ${res.status}): ${detail}. Pick another in Braid > Settings, or leave the model empty so braid chooses one that works.`);
       }
       if (res.status === 404) throw new Error(`${label} does not know that model or endpoint (HTTP 404): ${detail}`);
+      const wanted = (body as { max_tokens?: number }).max_tokens;
+      if (res.status === 400 && wanted && wanted > 1024 && /max_tokens|max_completion_tokens|maximum context|context length|context window/i.test(detail)) {
+        // The endpoint (or this model) allows fewer reply tokens than asked for: ask for half, and try again.
+        (body as { max_tokens?: number }).max_tokens = Math.floor(wanted / 2);
+        lastError = `${label} refused max_tokens ${wanted} (HTTP 400): ${detail}`;
+        continue;
+      }
       if (res.status === 400 && /tool|function/i.test(detail)) {
         throw new Error(`${label} refused the request, probably because this model does not support tool calling (HTTP 400): ${detail}. Pick another model in Settings.`);
       }

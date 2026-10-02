@@ -283,10 +283,13 @@ export class RunManager {
     if (!goal.trim()) throw new HttpError(400, 'goal is required');
     const driver = requested ?? this.effectiveDriver();
     if (this.isDisabled(driver)) throw new HttpError(400, `The ${driver} agent is switched off in Settings.`);
+    const model = this.defaults.models?.[driver];
     try {
-      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model: this.defaults.models?.[driver], signal });
+      return await planGoal(this.drivers().get(driver), { repo: this.repo, goal, verify, model, signal });
     } catch (err) {
-      throw new HttpError(502, (err as Error).message);
+      // Say which agent was asked: the page does not choose one, so it is the default agent in Settings.
+      const why = (err as Error).message.replace(/^planner failed: /, '');
+      throw new HttpError(502, `The ${driver} agent${model ? ` (${model})` : ''} could not draft a plan: ${why}`);
     }
   }
 }

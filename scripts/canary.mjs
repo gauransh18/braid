@@ -164,7 +164,7 @@ async function canary(braid, driver, model, { env, dir, timeoutMs }) {
     for (const t of TASKS) {
       const s = state.tasks?.[t.id];
       if (s?.status !== 'done') {
-        problems.push(`task ${t.id} ended "${s?.status}", not merged${s?.error ? `: ${s.error.split('\n')[0].slice(0, 200)}` : ''}`);
+        problems.push(`task ${t.id} ended "${s?.status}", not merged${s?.error ? `: ${s.error.replace(/\s+/g, ' ').slice(0, 600)}` : ''}`);
         continue;
       }
       if (!total(s.tokens)) problems.push(`task ${t.id} reported no tokens (the agent's usage output was not understood)`);

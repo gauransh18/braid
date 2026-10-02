@@ -43,6 +43,18 @@ export class Git {
    */
   private pinned = new Map<string, string>();
 
+  /**
+   * Worktree and branch bookkeeping (`worktree add`, `remove`, `prune`, `branch -D`) all rewrite shared files under
+   * `.git`, and tasks start and finish at the same time. Git does not promise that these are safe to run side by side
+   * (one failed with exit 128 on a busy CI machine), and none is slow enough to be worth the risk, so they take turns.
+   */
+  private adminQueue: Promise<unknown> = Promise.resolve();
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const turn = this.adminQueue.then(fn, fn);
+    this.adminQueue = turn.catch(() => undefined);
+    return turn;
+  }
+
   async run(args: string[], cwd = this.repo, allowFail = false, signal?: AbortSignal) {
     const gitDir = this.pinned.get(resolve(cwd));
     const pin = gitDir ? ['--git-dir', gitDir, '--work-tree', resolve(cwd), '-c', 'core.fsmonitor=false'] : [];
@@ -153,27 +165,33 @@ export class Git {
    * `stoppable: false` for the run's own integration worktree: a Stop there is honoured once git returns, so the run
    * still ends as aborted, with a branch to resume from.
    */
-  async addWorktree(path: string, newBranch: string, from: string, stoppable = true): Promise<void> {
+  addWorktree(path: string, newBranch: string, from: string, stoppable = true): Promise<void> {
+    return this.exclusive(() => this.addWorktreeNow(path, newBranch, from, stoppable));
+  }
+
+  private async addWorktreeNow(path: string, newBranch: string, from: string, stoppable: boolean): Promise<void> {
     const args = ['worktree', 'add', '-b', newBranch, path, from];
     if (!stoppable) await this.run(args);
     else {
       await this.stoppable(args, this.repo, false, async (startedAt) => {
         // A killed `worktree add` leaves a locked, half-made worktree and the new branch, and can leave the lock on its ref.
-        await this.removeWorktree(path);
+        await this.removeWorktreeNow(path);
         await rm(path, { recursive: true, force: true });
         const { stdout } = await this.run(['rev-parse', '--git-path', `refs/heads/${newBranch}.lock`]);
         await this.dropLock(resolve(this.repo, stdout.trim()), startedAt, [resolve(path)]);
-        await this.deleteBranch(newBranch);
+        await this.deleteBranchNow(newBranch);
       });
     }
     await this.pin(path);
   }
 
   /** Check out an existing branch into a new worktree. */
-  async attachWorktree(path: string, branch: string): Promise<void> {
-    await this.run(['worktree', 'prune']);
-    await this.run(['worktree', 'add', path, branch]);
-    await this.pin(path);
+  attachWorktree(path: string, branch: string): Promise<void> {
+    return this.exclusive(async () => {
+      await this.run(['worktree', 'prune']);
+      await this.run(['worktree', 'add', path, branch]);
+      await this.pin(path);
+    });
   }
 
   async branchExists(branch: string): Promise<boolean> {
@@ -189,14 +207,22 @@ export class Git {
    * Remove a worktree, whatever state it is in. A git killed in the middle of `worktree add` leaves the new worktree
    * locked ("initializing"), which a plain `remove --force` refuses and `prune` skips, so it is unlocked first.
    */
-  async removeWorktree(path: string): Promise<void> {
+  removeWorktree(path: string): Promise<void> {
+    return this.exclusive(() => this.removeWorktreeNow(path));
+  }
+
+  private async removeWorktreeNow(path: string): Promise<void> {
     await this.run(['worktree', 'unlock', path], this.repo, true);
     await this.run(['worktree', 'remove', '--force', '--force', path], this.repo, true);
     await this.run(['worktree', 'prune'], this.repo, true);
     this.pinned.delete(resolve(path));
   }
 
-  async deleteBranch(branch: string): Promise<void> {
+  deleteBranch(branch: string): Promise<void> {
+    return this.exclusive(() => this.deleteBranchNow(branch));
+  }
+
+  private async deleteBranchNow(branch: string): Promise<void> {
     await this.run(['branch', '-D', branch], this.repo, true);
   }
 

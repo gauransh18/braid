@@ -83,3 +83,33 @@ describe('a worktree whose .git pointer was rewritten', { skip: process.platform
     assert.equal(log, 'braid(a): attempt 1', 'the commit went to the real repository');
   });
 });
+
+describe('worktree bookkeeping', () => {
+  it('takes turns: tasks that start and finish together never run two worktree or branch commands side by side', async () => {
+    const repo = await makeRepo();
+    const git = new Git(repo);
+    const real = git.run.bind(git);
+    let inFlight = 0;
+    let most = 0;
+    git.run = async (args, cwd, allowFail, signal) => {
+      const admin = args[0] === 'worktree' || args[0] === 'branch';
+      if (admin) most = Math.max(most, ++inFlight);
+      try {
+        return await real(args, cwd, allowFail, signal);
+      } finally {
+        if (admin) inFlight--;
+      }
+    };
+    const root = tmp('braid-wts-');
+    await Promise.all(
+      [1, 2, 3, 4, 5].map(async (n) => {
+        const dir = join(root, `t${n}`);
+        await git.removeWorktree(dir);
+        await git.deleteBranch(`braid/test/task-${n}`);
+        await git.addWorktree(dir, `braid/test/task-${n}`, 'HEAD');
+        await git.removeWorktree(dir);
+      }),
+    );
+    assert.equal(most, 1);
+  });
+});

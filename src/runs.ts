@@ -42,7 +42,12 @@ export interface SettingsInput {
  * through the token-guarded control endpoints.
  */
 export class RunManager {
-  private active?: { runId: string; ac: AbortController };
+  /**
+   * The run in progress. `ending` is set the moment the run reports its end (before its last snapshot is written), so
+   * whoever sees a final state.json can already start the next run or resume this one: counting the run as active
+   * until its promise settles left a gap in which a finished run still answered 409.
+   */
+  private active?: { runId: string; ac: AbortController; ending: boolean; done: Promise<void> };
   private defaults: AgentDefaults = {};
   /** Environment values as they were before Settings overrode them, so removing a key restores them. */
   private originalEnv = new Map<string, string | undefined>();
@@ -53,7 +58,7 @@ export class RunManager {
   ) {}
 
   get activeRunId(): string | null {
-    return this.active?.runId ?? null;
+    return this.active && !this.active.ending ? this.active.runId : null;
   }
 
   get agentDefaults(): AgentDefaults {
@@ -192,7 +197,7 @@ export class RunManager {
     const plan = resumeId ? given : this.withDefaults(given);
     this.checkPlan(plan);
     this.checkEnabled(plan);
-    if (this.active) throw new HttpError(409, `run ${this.active.runId} is still active`);
+    if (this.active && !this.active.ending) throw new HttpError(409, `run ${this.active.runId} is still active`);
 
     const ac = new AbortController();
     let orch: Orchestrator;
@@ -201,7 +206,12 @@ export class RunManager {
     } catch (err) {
       throw new HttpError(400, (err as Error).message);
     }
-    this.active = { runId: orch.runId, ac };
+    let finish!: () => void;
+    const mine = { runId: orch.runId, ac, ending: false, done: new Promise<void>((resolve) => (finish = resolve)) };
+    this.active = mine;
+    orch.store.onEvent((e) => {
+      if (e.type === 'run_end') mine.ending = true;
+    });
 
     let failEarly!: (err: Error) => void;
     const failed = new Promise<never>((_, reject) => (failEarly = reject));
@@ -214,13 +224,15 @@ export class RunManager {
     void orch
       .run()
       .catch(async (err) => {
+        mine.ending = true;
         const message = err instanceof Error ? err.message : String(err);
         orch.store.event('run_error', { message });
         await markFailed(this.repo, orch.runId);
         failEarly(new HttpError(500, message));
       })
       .finally(() => {
-        this.active = undefined;
+        if (this.active === mine) this.active = undefined;
+        finish();
       });
     failed.catch(() => undefined); // a failure after the run began is reported through events, not this promise
 
@@ -255,13 +267,14 @@ export class RunManager {
   async stopAndWait(ms: number): Promise<void> {
     const active = this.active;
     if (!active) return;
-    active.ac.abort();
-    const end = Date.now() + ms;
-    while (this.active === active && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+    if (!active.ending) active.ac.abort();
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([active.done, new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+    clearTimeout(timer);
   }
 
   stop(runId: string): void {
-    if (this.active?.runId !== runId) throw new HttpError(409, 'that run is not active');
+    if (!this.active || this.active.ending || this.active.runId !== runId) throw new HttpError(409, 'that run is not active');
     this.active.ac.abort();
   }
 

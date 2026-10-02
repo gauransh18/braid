@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isRetired, NIM_PREFERRED_MODELS } from '../nim.js';
 import { DRIVER_DEFAULT_MODEL, estimateCostUsd, sumUsage, type Usage } from '../pricing.js';
 import { shell } from '../proc.js';
 import type { AgentEvent, AgentResult } from '../types.js';
@@ -12,8 +13,13 @@ export interface OpenAICompatConfig {
   baseUrl: string;
   /** Environment variable holding the API key. Read at run time, so Settings can change it without a restart. */
   keyEnv: string;
-  /** Model used when the plan and Settings name none. */
+  /** Model used when the plan and Settings name none, if `resolveModel` does not choose one. */
   defaultModel: string;
+  /**
+   * Chooses a model that works right now when none was named, and a replacement when the one in use turns out to be
+   * retired (`avoid` lists it). For a hosted service that retires models, this is better than a name written down.
+   */
+  resolveModel?: (key: string, signal?: AbortSignal, avoid?: string[]) => Promise<string>;
   /** Human name for error messages, e.g. "NVIDIA NIM". */
   label?: string;
   /** Base delay between retries of rate-limit and server errors. Tests shorten it. */
@@ -32,6 +38,16 @@ export interface OpenAICompatConfig {
  * Write the file-changing ones, `Bash(...)` a command runner. A reviewer or planner (canEdit false) only ever
  * gets the read tools. All paths are confined to the worktree.
  */
+/** The service says the model has been taken down (HTTP 410, or 404 with a retirement notice). */
+export class RetiredModelError extends Error {
+  constructor(
+    readonly model: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export class OpenAICompatDriver implements Driver {
   readonly name: string;
 
@@ -52,7 +68,16 @@ export class OpenAICompatDriver implements Driver {
     const key = process.env[this.cfg.keyEnv];
     if (!key) return finish(false, `${this.cfg.keyEnv} is not set. Add your ${label} API key in Braid > Settings.`);
 
-    const model = opts.model || this.cfg.defaultModel;
+    let model = opts.model;
+    if (!model) {
+      try {
+        model = this.cfg.resolveModel ? await this.cfg.resolveModel(key, opts.signal) : this.cfg.defaultModel;
+      } catch (err) {
+        if (opts.signal?.aborted) return finish(false, 'aborted');
+        return finish(false, (err as Error).message, [], undefined, true);
+      }
+    }
+    let switched = false;
     const tools = toolsFor(opts);
     const messages: any[] = [
       { role: 'system', content: systemPrompt(opts.canEdit, tools.some((t) => t.function.name === 'run_command')) },
@@ -70,6 +95,20 @@ export class OpenAICompatDriver implements Driver {
       try {
         reply = await this.chat(key, { model, messages, tools: tools.length ? tools : undefined, tool_choice: tools.length ? 'auto' : undefined, temperature: 0.2 }, opts.signal);
       } catch (err) {
+        // The service took the model down since it was chosen (usually a name saved in Settings long ago): use one that
+        // works instead of failing every run, and say so, once.
+        if (err instanceof RetiredModelError && this.cfg.resolveModel && !switched) {
+          try {
+            const next = await this.cfg.resolveModel(key, opts.signal, [model]);
+            emit({ kind: 'text', text: `${this.cfg.label ?? this.cfg.name} has retired ${model}. Using ${next} for this run; change the model in Braid > Settings to stop seeing this.` });
+            model = next;
+            switched = true;
+            turn--; // this turn never got an answer: redo it with the new model
+            continue;
+          } catch (fallback) {
+            return finish(false, `${(err as Error).message} No replacement could be chosen: ${(fallback as Error).message}`, usage, model, true);
+          }
+        }
         return finish(false, (err as Error).message, usage, model, true);
       }
       const u = reply.usage;
@@ -154,6 +193,10 @@ export class OpenAICompatDriver implements Driver {
         continue;
       }
       if (res.status === 401 || res.status === 403) throw new Error(`${label} rejected the API key (HTTP ${res.status}). Check it in Braid > Settings.`);
+      if (isRetired(res.status, text)) {
+        const gone = String((body as { model?: unknown }).model ?? 'that model');
+        throw new RetiredModelError(gone, `${label} has retired the model ${gone} (HTTP ${res.status}): ${detail}. Pick another in Braid > Settings, or leave the model empty so braid chooses one that works.`);
+      }
       if (res.status === 404) throw new Error(`${label} does not know that model or endpoint (HTTP 404): ${detail}`);
       if (res.status === 400 && /tool|function/i.test(detail)) {
         throw new Error(`${label} refused the request, probably because this model does not support tool calling (HTTP 400): ${detail}. Pick another model in Settings.`);
@@ -366,5 +409,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export const NIM_DEFAULT_MODEL = 'meta/llama-3.3-70b-instruct';
+/** Where braid looks first for a NIM model; the one used is chosen at run time (see src/nim.ts). */
+export const NIM_DEFAULT_MODEL = NIM_PREFERRED_MODELS[0]!;
 DRIVER_DEFAULT_MODEL.nim = NIM_DEFAULT_MODEL;

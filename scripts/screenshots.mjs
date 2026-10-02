@@ -315,14 +315,14 @@ async function guidedStartShot() {
 
 const TAURI_DATA = {
   recent_repos: ['/Users/alex/code/billing-api', '/Users/alex/code/notes-service', '/Users/alex/work/web-frontend'],
-  settings_get: { default_agent: 'claude', models: { claude: 'sonnet', nim: 'meta/llama-3.3-70b-instruct' }, key_set: { nim: true }, disabled: [] },
+  settings_get: { default_agent: 'claude', models: { claude: 'sonnet', nim: 'nvidia/nemotron-3-super-120b-a12b' }, key_set: { nim: true }, disabled: [] },
   settings_agents: [{ name: 'claude', ok: true, version: '2.1.283' }, { name: 'codex', ok: true, version: 'codex-cli 0.147.0' }, { name: 'gemini', ok: false }],
 };
 // A provider with a saved key shows the provider's own live list; the others show what the installed CLI knows.
 const TAURI_STUB = `(() => {
   const data = ${JSON.stringify(TAURI_DATA)};
   const models = (provider) => provider === 'nim'
-    ? { source: 'live', models: ['meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mixtral-8x22b-instruct-v0.1'], at: Date.now() }
+    ? { source: 'live', models: ['nvidia/nemotron-3-super-120b-a12b', 'nvidia/llama-3.1-nemotron-ultra-253b-v1', 'mistralai/mistral-large-2-instruct'], at: Date.now() }
     : { source: 'cli', models: ['opus', 'sonnet', 'haiku'], at: Date.now() };
   window.__TAURI__ = { core: { invoke: async (cmd, args) => (cmd === 'settings_models' ? models(args.provider) : data[cmd]) } };
 })();`;

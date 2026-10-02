@@ -8,6 +8,7 @@ import { DriverRegistry } from './drivers/driver.js';
 import { GeminiDriver } from './drivers/gemini.js';
 import { MockDriver } from './drivers/mock.js';
 import { NIM_DEFAULT_MODEL, OpenAICompatDriver } from './drivers/openai-compat.js';
+import { pickNimModel } from './nim.js';
 import { createDemoRun } from './demo.js';
 import { cleanCommand } from './clean.js';
 import { checkTools, doctorExitCode, formatDoctor } from './doctor.js';
@@ -62,6 +63,7 @@ Runs never touch your branches. Work lands on braid/<runId>/integration;
 review it and merge it yourself.`;
 
 function registry(): DriverRegistry {
+  const nimBase = process.env.BRAID_NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1';
   return new DriverRegistry()
     .register(new ClaudeDriver())
     .register(new CodexDriver())
@@ -71,9 +73,11 @@ function registry(): DriverRegistry {
       new OpenAICompatDriver({
         name: 'nim',
         label: 'NVIDIA NIM',
-        baseUrl: process.env.BRAID_NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
+        baseUrl: nimBase,
         keyEnv: 'NVIDIA_API_KEY',
         defaultModel: NIM_DEFAULT_MODEL,
+        // NVIDIA retires hosted models without notice, so the model is chosen from the live list when none is named.
+        resolveModel: async (key, signal, avoid) => (await pickNimModel({ baseUrl: nimBase, key, signal, avoid })).model,
       }),
     )
     .register(new MockDriver());

@@ -272,13 +272,15 @@ function fakeNimServer() {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      // With no model named, the driver reads the model list and asks the model it picks for a tool call first.
+      if (req.url?.endsWith('/models')) return res.end(JSON.stringify({ data: [{ id: 'nvidia/nemotron-3-super-120b-a12b' }] }));
       const messages = JSON.parse(body).messages ?? [];
       const m = WANTED.exec(messages.find((x) => x.role === 'user')?.content ?? '');
       const usage = drifts('nim', 'usage') ? undefined : { prompt_tokens: 500, completion_tokens: 40, prompt_tokens_details: { cached_tokens: 0 } };
       const message = messages.some((x) => x.role === 'tool')
         ? { role: 'assistant', content: m ? `Created ${m[1]}.` : 'done' }
         : { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: m?.[1], content: `${m?.[2]}\n` }) } }] };
-      res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify(drifts('nim', 'result') ? { id: 'x', object: 'chat.completion', usage } : { id: 'x', object: 'chat.completion', choices: [{ index: 0, message, finish_reason: 'stop' }], usage }));
     });
   });

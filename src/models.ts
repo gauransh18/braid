@@ -1,3 +1,4 @@
+import { isRetired, NIM_PREFERRED_MODELS, pickNimModel } from './nim.js';
 import { findExecutable } from './spawn.js';
 
 /**
@@ -191,12 +192,32 @@ export async function testProvider(
 
   if (model) {
     const found = listed.models.includes(model);
-    steps.push({ name: 'Model is available', ok: found, detail: found ? model : `${model} is not in ${ep.label}'s list. Pick one from the list or check the spelling.` });
+    // NIM retires models without notice; say so, and name some that work, rather than only "not in the list".
+    const alternatives = provider === 'nim' ? NIM_PREFERRED_MODELS.filter((m) => listed.models.includes(m)).slice(0, 3) : [];
+    steps.push({
+      name: 'Model is available',
+      ok: found,
+      detail: found
+        ? model
+        : `${model} is not in ${ep.label}'s list. ${provider === 'nim' ? 'NVIDIA retires models without notice, so it may have been taken down. ' : ''}Pick one from the list or check the spelling${alternatives.length ? `; for example ${alternatives.join(', ')}` : ''}.`,
+    });
     if (!found) return done();
   }
 
+  if (provider === 'nim' && !model) {
+    // Nothing chosen: this is what a run would use, so find it the same way and report which model that is.
+    try {
+      const pick = await pickNimModel({ baseUrl: base(provider, env), key, fetchImpl, timeoutMs: chatTimeoutMs, avoid: [] });
+      const passed = pick.skipped.length ? ` (passed over: ${pick.skipped.map((s) => `${s.model} ${s.why}`).join('; ')})` : '';
+      steps.push({ name: 'Model chosen automatically', ok: true, detail: `${pick.model} is available and accepts tool calls${passed}. Runs use it until you pick a model here.` });
+    } catch (err) {
+      steps.push({ name: 'Model chosen automatically', ok: false, detail: (err as Error).message });
+    }
+    return done();
+  }
+
   if (provider === 'nim') {
-    const use = model || 'meta/llama-3.3-70b-instruct';
+    const use = model!;
     const started = Date.now();
     try {
       const res = await fetchImpl(base(provider, env) + '/chat/completions', {
@@ -218,6 +239,7 @@ export async function testProvider(
         const slow = ms > 20_000 ? ` It answered slowly (${Math.round(ms / 1000)} s), and a run asks the model many times, so a faster model will finish sooner.` : '';
         steps.push({ name: 'Model answers and accepts tool calls', ok: true, detail: `${use} works with braid's tools.${slow}`, ms });
       }
+      else if (isRetired(res.status, text)) steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: `${use} has been retired by ${ep.label} (HTTP ${res.status}). Pick another model, or clear the field so braid chooses one that works.`, ms });
       else if (res.status === 400 && /tool|function/i.test(text)) steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: `${use} does not support tool calling, which braid needs. Pick another model.`, ms });
       else steps.push({ name: 'Model answers and accepts tool calls', ok: false, detail: explain(provider, res.status, text), ms });
     } catch (err) {
@@ -228,7 +250,7 @@ export async function testProvider(
         ms: Date.now() - started,
         // Reaching the model list already worked, so this is not a connection or key problem.
         detail: timedOut
-          ? `${ep.label} is reachable and listed ${use}, but it did not answer within ${Math.round(chatTimeoutMs / 1000)} s. Hosted models can be queued or slow to start, especially large ones. Try again, or pick a smaller model (for example meta/llama-3.3-70b-instruct).`
+          ? `${ep.label} is reachable and listed ${use}, but it did not answer within ${Math.round(chatTimeoutMs / 1000)} s. Hosted models can be queued or slow to start, especially large ones. Try again, or pick a smaller model.`
           : `Could not reach ${ep.label}: ${(err as Error).message}`,
       });
     }

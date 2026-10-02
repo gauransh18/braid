@@ -151,6 +151,18 @@ describe('the NIM driver and a retired model', () => {
     }
   });
 
+  it('uses exactly the model that was named, without asking NVIDIA which models there are or testing it first', async () => {
+    const api = await fakeNim([BEST, SECOND], () => ok('as asked'));
+    try {
+      const { res } = await run(make(api.url), 'acme/the-one-the-user-chose');
+      assert.equal(res.ok, true, res.text);
+      assert.deepEqual(api.chats.map((c) => c.model), ['acme/the-one-the-user-chose'], 'one request, to the chosen model');
+      assert.equal(api.lists(), 0, 'the model list was never read');
+    } finally {
+      await api.close();
+    }
+  });
+
   it('switches once, and says so, when the model that was named has been retired', async () => {
     const api = await fakeNim([SECOND], (m) => (m === 'meta/llama-3.3-70b-instruct' ? { status: 410, body: RETIRED_BODY(m) } : ok('finished')));
     try {

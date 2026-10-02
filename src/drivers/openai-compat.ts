@@ -24,8 +24,10 @@ export interface OpenAICompatConfig {
   label?: string;
   /** Base delay between retries of rate-limit and server errors. Tests shorten it. */
   retryDelayMs?: number;
-  /** How long one request may take before it is abandoned. Default 180 s. */
+  /** How long a request may go without a single byte arriving (the service queued it, or hung) before it is abandoned. Default 180 s. */
   requestTimeoutMs?: number;
+  /** The longest one answer may take, however steadily it arrives. Default 20 minutes. */
+  totalTimeoutMs?: number;
   /**
    * Most tokens one reply may have. Sent on every request, because a hosted endpoint's own default is small (NVIDIA's
    * can cut a drafted plan off in the middle of its JSON). Halved and retried when the endpoint says it is too many.
@@ -52,8 +54,11 @@ export function stripThinking(text: string, trim = true): string {
  * Write the file-changing ones, `Bash(...)` a command runner. A reviewer or planner (canEdit false) only ever
  * gets the read tools. All paths are confined to the worktree.
  */
+/** An answer from the service that is final: something to report as it is, not to retry. */
+export class ApiError extends Error {}
+
 /** The service says the model has been taken down (HTTP 410, or 404 with a retirement notice). */
-export class RetiredModelError extends Error {
+export class RetiredModelError extends ApiError {
   constructor(
     readonly model: string,
     message: string,
@@ -191,65 +196,176 @@ export class OpenAICompatDriver implements Driver {
     return finish(false, `Stopped after ${maxTurns} turns without a final answer. Raise maxTurns in the plan, or split the task.`, usage, model);
   }
 
-  private async chat(key: string, body: unknown, signal?: AbortSignal): Promise<any> {
+  /** Set when an endpoint turned down `stream`, so later requests do not ask for it. */
+  private noStream = false;
+  /** Set when an endpoint turned down `stream_options` (which asks for the token counts at the end of a stream). */
+  private noStreamUsage = false;
+
+  /**
+   * One chat completion. The reply is streamed, so the time limit is on silence (`requestTimeoutMs`) and not on the whole
+   * answer: a large model writing a long plan can take minutes and still be perfectly well, which a limit on the whole
+   * request mistook for a hang. A cap on the total (`totalTimeoutMs`) still stops one that never ends. The chunks are
+   * put back together into the reply a plain request would have returned, so nothing else has to know.
+   */
+  private async chat(key: string, body: any, signal?: AbortSignal): Promise<any> {
     const label = this.cfg.label ?? this.cfg.name;
     const delay = this.cfg.retryDelayMs ?? 1500;
-    const timeoutMs = this.cfg.requestTimeoutMs ?? 180_000;
+    const idleMs = this.cfg.requestTimeoutMs ?? 180_000;
+    const totalMs = this.cfg.totalTimeoutMs ?? 20 * 60_000;
     let lastError = '';
     let timeouts = 0;
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt) await sleep(delay * attempt, signal);
-      let res: Response;
+      const ours = new AbortController();
+      let idle: NodeJS.Timeout | undefined;
+      const hearing = () => {
+        clearTimeout(idle);
+        idle = setTimeout(() => ours.abort(new Error('silent')), idleMs);
+      };
+      const total = setTimeout(() => ours.abort(new Error('total')), totalMs);
+      const stop = () => {
+        clearTimeout(idle);
+        clearTimeout(total);
+      };
+      let heardAnything = false;
       try {
-        res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        const payload = this.noStream ? body : { ...body, stream: true, ...(this.noStreamUsage ? {} : { stream_options: { include_usage: true } }) };
+        hearing();
+        const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-          body: JSON.stringify(body),
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+          body: JSON.stringify(payload),
+          signal: signal ? AbortSignal.any([signal, ours.signal]) : ours.signal,
         });
-      } catch (err) {
-        if (signal?.aborted) throw new Error('aborted');
-        const timedOut = (err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError';
-        lastError = timedOut
-          ? `${label} did not answer within ${Math.round(timeoutMs / 1000)} s. The model may be queued or too large for the hosted service; try again or pick a smaller model in Settings.`
-          : `Could not reach ${label}: ${(err as Error).message}`;
-        // A model that sat silent for the whole timeout will usually do it again; do not stall a run for minutes retrying.
-        if (timedOut && ++timeouts >= 2) throw new Error(lastError);
-        continue;
-      }
-      const text = await res.text();
-      if (res.ok) {
-        try {
-          return JSON.parse(text);
-        } catch {
-          throw new Error(`${label} sent a reply that is not JSON: ${text.slice(0, 200)}`);
+        if (res.ok && res.body && /text\/event-stream/i.test(res.headers.get('content-type') ?? '')) {
+          const reply = await readStream(res.body, () => {
+            heardAnything = true;
+            hearing();
+          });
+          stop();
+          return reply;
         }
-      }
-      const detail = text.slice(0, 400).replace(/\s+/g, ' ');
-      if (res.status === 429 || res.status >= 500) {
-        lastError = `${label} is busy or failing (HTTP ${res.status}): ${detail}`;
+        const text = await res.text();
+        stop();
+        if (res.ok) {
+          // A server that ignored `stream` and sent the whole reply at once.
+          try {
+            return JSON.parse(text);
+          } catch {
+            throw new ApiError(`${label} sent a reply that is not JSON: ${text.slice(0, 200)}`);
+          }
+        }
+        const detail = text.slice(0, 400).replace(/\s+/g, ' ');
+        if (res.status === 429 || res.status >= 500) {
+          lastError = `${label} is busy or failing (HTTP ${res.status}): ${detail}`;
+          continue;
+        }
+        if (res.status === 401 || res.status === 403) throw new ApiError(`${label} rejected the API key (HTTP ${res.status}). Check it in Braid > Settings.`);
+        if (isRetired(res.status, text)) {
+          const gone = String(body.model ?? 'that model');
+          throw new RetiredModelError(gone, `${label} has retired the model ${gone} (HTTP ${res.status}): ${detail}. Pick another in Braid > Settings, or leave the model empty so braid chooses one that works.`);
+        }
+        if (res.status === 404) throw new ApiError(`${label} does not know that model or endpoint (HTTP 404): ${detail}`);
+        if (res.status === 400 && !this.noStreamUsage && /stream_options|include_usage/i.test(detail)) {
+          this.noStreamUsage = true; // streams without the closing token counts
+          continue;
+        }
+        if (res.status === 400 && !this.noStream && /\bstream\b/i.test(detail)) {
+          this.noStream = true; // this endpoint wants plain requests
+          continue;
+        }
+        const wanted = body.max_tokens as number | undefined;
+        if (res.status === 400 && wanted && wanted > 1024 && /max_tokens|max_completion_tokens|maximum context|context length|context window/i.test(detail)) {
+          // The endpoint (or this model) allows fewer reply tokens than asked for: ask for half, and try again.
+          body.max_tokens = Math.floor(wanted / 2);
+          lastError = `${label} refused max_tokens ${wanted} (HTTP 400): ${detail}`;
+          continue;
+        }
+        if (res.status === 400 && /tool|function/i.test(detail)) {
+          throw new ApiError(`${label} refused the request, probably because this model does not support tool calling (HTTP 400): ${detail}. Pick another model in Settings.`);
+        }
+        throw new ApiError(`${label} error (HTTP ${res.status}): ${detail}`);
+      } catch (err) {
+        stop();
+        if (signal?.aborted) throw new Error('aborted');
+        // Our own timers fired: nothing arrived for a while, or the answer went on for too long.
+        if (ours.signal.aborted) {
+          const capped = (ours.signal.reason as Error | undefined)?.message === 'total';
+          lastError = capped
+            ? `${label} was still answering after ${Math.round(totalMs / 60_000)} minutes, so it was stopped. Pick a faster model in Settings.`
+            : heardAnything
+              ? `${label} started to answer and then went silent for ${Math.round(idleMs / 1000)} s. The service may be overloaded; try again or pick another model in Settings.`
+              : `${label} did not answer within ${Math.round(idleMs / 1000)} s. The model may be queued or too large for the hosted service; try again or pick a smaller model in Settings.`;
+          // A model that sat silent for the whole timeout will usually do it again; do not stall a run for minutes retrying.
+          if (capped || ++timeouts >= 2) throw new Error(lastError);
+          continue;
+        }
+        // Everything thrown above on purpose (a rejected key, a retired model, an unusable reply) is already a message.
+        if (err instanceof ApiError) throw err;
+        lastError = `Could not reach ${label}: ${(err as Error).message}`;
         continue;
       }
-      if (res.status === 401 || res.status === 403) throw new Error(`${label} rejected the API key (HTTP ${res.status}). Check it in Braid > Settings.`);
-      if (isRetired(res.status, text)) {
-        const gone = String((body as { model?: unknown }).model ?? 'that model');
-        throw new RetiredModelError(gone, `${label} has retired the model ${gone} (HTTP ${res.status}): ${detail}. Pick another in Braid > Settings, or leave the model empty so braid chooses one that works.`);
-      }
-      if (res.status === 404) throw new Error(`${label} does not know that model or endpoint (HTTP 404): ${detail}`);
-      const wanted = (body as { max_tokens?: number }).max_tokens;
-      if (res.status === 400 && wanted && wanted > 1024 && /max_tokens|max_completion_tokens|maximum context|context length|context window/i.test(detail)) {
-        // The endpoint (or this model) allows fewer reply tokens than asked for: ask for half, and try again.
-        (body as { max_tokens?: number }).max_tokens = Math.floor(wanted / 2);
-        lastError = `${label} refused max_tokens ${wanted} (HTTP 400): ${detail}`;
-        continue;
-      }
-      if (res.status === 400 && /tool|function/i.test(detail)) {
-        throw new Error(`${label} refused the request, probably because this model does not support tool calling (HTTP 400): ${detail}. Pick another model in Settings.`);
-      }
-      throw new Error(`${label} error (HTTP ${res.status}): ${detail}`);
     }
     throw new Error(lastError || `${label} did not answer`);
   }
+}
+
+/**
+ * Put a chat completion stream (server-sent events) back together as one reply: the text, the tool calls (their names and
+ * arguments arrive in pieces, keyed by index), the finish reason, and the token counts when the server sends them.
+ * `heard` runs on every chunk that arrives, so the caller can tell a quiet connection from a slow answer.
+ */
+export async function readStream(body: ReadableStream<Uint8Array>, heard: () => void = () => undefined): Promise<any> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let finish: string | undefined;
+  let usage: unknown;
+  const calls: { id: string; type: 'function'; function: { name: string; arguments: string } }[] = [];
+
+  const apply = (json: any) => {
+    if (json.error) throw new ApiError(`NVIDIA NIM error (stream): ${String(json.error.message ?? JSON.stringify(json.error)).slice(0, 300)}`);
+    if (json.usage) usage = json.usage;
+    const choice = json.choices?.[0];
+    if (!choice) return;
+    const delta = choice.delta ?? choice.message ?? {};
+    if (typeof delta.content === 'string') content += delta.content;
+    for (const piece of delta.tool_calls ?? []) {
+      const at = Number.isInteger(piece.index) ? piece.index : calls.length;
+      const call = (calls[at] ??= { id: '', type: 'function', function: { name: '', arguments: '' } });
+      if (piece.id) call.id = piece.id;
+      if (piece.function?.name) call.function.name += piece.function.name;
+      if (piece.function?.arguments) call.function.arguments += piece.function.arguments;
+    }
+    if (choice.finish_reason) finish = choice.finish_reason;
+  };
+
+  let ended = false;
+  while (!ended) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    heard();
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
+      const event = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const data = event.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
+      if (!data) continue;
+      if (data === '[DONE]') {
+        ended = true;
+        break;
+      }
+      try {
+        apply(JSON.parse(data));
+      } catch (err) {
+        if (err instanceof SyntaxError) continue; // a keep-alive or a half chunk: the next one carries on
+        throw err;
+      }
+    }
+  }
+  const toolCalls = calls.filter(Boolean).map((c, i) => ({ ...c, id: c.id || `call_${i}` }));
+  return { choices: [{ message: { role: 'assistant', content: content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }], usage };
 }
 
 // ---------------------------------------------------------------- tools

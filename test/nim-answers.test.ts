@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
-import { OpenAICompatDriver, stripThinking } from '../src/drivers/openai-compat.js';
+import { OpenAICompatDriver, readStream, stripThinking } from '../src/drivers/openai-compat.js';
 import { planGoal } from '../src/planner.js';
 
 const temps: string[] = [];
@@ -175,5 +175,141 @@ describe('drafting a plan with NIM', () => {
     } finally {
       await api.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------- streaming
+
+type Piece = { after?: number; data: string };
+const delta = (d: object, finish: string | null = null) => JSON.stringify({ choices: [{ index: 0, delta: d, finish_reason: finish }] });
+
+/** A stand-in that streams server-sent events: each piece is written `after` milliseconds after the one before. */
+async function fakeStream(replies: (Piece[] | Reply)[]) {
+  const bodies: any[] = [];
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => (raw += d));
+    req.on('end', async () => {
+      bodies.push(JSON.parse(raw));
+      const r = replies[Math.min(bodies.length - 1, replies.length - 1)]!;
+      if (!Array.isArray(r)) {
+        res.writeHead(r.status ?? 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(r.body));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const piece of r) {
+        if (piece.after) await new Promise((ok) => setTimeout(ok, piece.after));
+        if (res.destroyed) return;
+        res.write(`data: ${piece.data}\n\n`);
+      }
+      res.end();
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+  return { url, bodies, close: () => new Promise<void>((r) => (server.closeAllConnections(), server.close(() => r()))) };
+}
+
+describe('streaming the answer', () => {
+  it('asks for a stream with the token counts at the end, and puts the text, a tool call and the counts back together', async () => {
+    const api = await fakeStream([
+      [
+        { data: delta({ role: 'assistant', content: 'Let me ' }) },
+        { data: delta({ content: 'look.' }) },
+        { data: delta({ tool_calls: [{ index: 0, id: 'c9', type: 'function', function: { name: 'Read', arguments: '{"pa' } }] }) },
+        { data: delta({ tool_calls: [{ index: 0, function: { arguments: 'th": "package.json"}' } }] }) },
+        { data: delta({}, 'tool_calls') },
+        { data: JSON.stringify({ choices: [], usage: { prompt_tokens: 40, completion_tokens: 12 } }) },
+        { data: '[DONE]' },
+      ],
+      [{ data: delta({ content: 'All read.' }, 'stop') }, { data: '[DONE]' }],
+    ]);
+    try {
+      const events: string[] = [];
+      const res = await driver(api.url).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false, onEvent: (e) => events.push(e.kind === 'tool' ? `tool ${e.name}` : e.kind === 'text' ? e.text : e.kind) });
+      assert.equal(res.ok, true, res.text);
+      assert.equal(res.text, 'All read.');
+      assert.equal(api.bodies[0].stream, true);
+      assert.deepEqual(api.bodies[0].stream_options, { include_usage: true });
+      assert.ok(events.includes('Let me look.') && events.includes('tool Read'), events.join(' | '));
+      assert.deepEqual(res.tokens && [res.tokens.input + res.tokens.cached, res.tokens.output], [40, 12 + 0], 'the counts at the end of the first stream were used');
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('waits as long as the answer keeps arriving, however long the whole thing takes', async () => {
+    // 6 pieces 150 ms apart is about 0.9 s in all, against a limit of 400 ms of silence.
+    const pieces: Piece[] = Array.from({ length: 6 }, (_, i) => ({ after: 150, data: delta({ content: `p${i} ` }) }));
+    const api = await fakeStream([[...pieces, { data: delta({}, 'stop') }, { data: '[DONE]' }]]);
+    try {
+      const res = await driver(api.url, { requestTimeoutMs: 400 }).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false });
+      assert.equal(res.ok, true, res.text);
+      assert.equal(res.text, 'p0 p1 p2 p3 p4 p5');
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('gives up when the stream goes silent, and says it had started', async () => {
+    const api = await fakeStream([[{ data: delta({ content: 'Starting ' }) }, { after: 5000, data: delta({ content: 'never seen' }) }]]);
+    try {
+      const res = await driver(api.url, { requestTimeoutMs: 300 }).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false });
+      assert.equal(res.ok, false);
+      assert.match(res.text, /started to answer and then went silent for 0 s/);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('stops an answer that never ends even though it keeps arriving', async () => {
+    const pieces: Piece[] = Array.from({ length: 40 }, () => ({ after: 100, data: delta({ content: 'x' }) }));
+    const api = await fakeStream([pieces]);
+    try {
+      const res = await driver(api.url, { requestTimeoutMs: 1000, totalTimeoutMs: 700 }).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false });
+      assert.equal(res.ok, false);
+      assert.match(res.text, /was still answering after 0 minutes, so it was stopped/);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('drops stream_options for an endpoint that does not know it, and streams on', async () => {
+    const api = await fakeStream([{ status: 400, body: { detail: 'Unknown parameter: stream_options' } }, [{ data: delta({ content: 'fine' }, 'stop') }, { data: '[DONE]' }]]);
+    try {
+      const res = await driver(api.url).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false });
+      assert.equal(res.ok, true, res.text);
+      assert.equal(res.text, 'fine');
+      assert.ok(api.bodies[0].stream_options && api.bodies[1].stream === true && api.bodies[1].stream_options === undefined);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('asks for a plain reply from an endpoint that does not stream', async () => {
+    const api = await fakeStream([{ status: 400, body: { detail: 'this model does not support stream' } }, { body: { choices: [{ message: { role: 'assistant', content: 'plain' }, finish_reason: 'stop' }] } }]);
+    try {
+      const res = await driver(api.url).run({ prompt: 'p', cwd: repo(), model: 'acme/m', allowedTools: ['Read'], canEdit: false });
+      assert.equal(res.ok, true, res.text);
+      assert.equal(res.text, 'plain');
+      assert.equal(api.bodies[1].stream, undefined);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('reads the pieces whatever way the bytes are cut, and ignores keep-alives', async () => {
+    const text = `: keep-alive\n\ndata: ${delta({ content: 'ab' })}\r\n\r\ndata: ${delta({ content: 'cd' }, 'stop')}\n\ndata: [DONE]\n\n`;
+    const bytes = new TextEncoder().encode(text);
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < bytes.length; i += 7) c.enqueue(bytes.slice(i, i + 7));
+        c.close();
+      },
+    });
+    const reply = await readStream(stream);
+    assert.equal(reply.choices[0].message.content, 'abcd');
+    assert.equal(reply.choices[0].finish_reason, 'stop');
   });
 });

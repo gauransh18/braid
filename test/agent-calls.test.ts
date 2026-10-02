@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { after, describe, it } from 'node:test';
 import { DriverRegistry, type Driver, type DriverRunOptions } from '../src/drivers/driver.js';
 import { MockDriver, type MockStep } from '../src/drivers/mock.js';
@@ -40,18 +41,31 @@ const OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_e
 const OUT_OF_USAGE = 'Claude AI usage limit reached|1700000000';
 
 describe('a call waiting to be retried', () => {
-  // b is turned away with a 529 and sleeps 1.5 s or more; a, which takes 500 ms, then uses up the run's tokens or its
-  // agent's quota. b must not call the agent again when it wakes. The margins are wide so a busy machine does not
-  // reorder the three things that have to happen in this order.
+  // b is turned away with a 529 and sleeps; a then uses up the run's tokens or its agent's quota. b must not call the
+  // agent again when it wakes. Nothing here depends on how fast the machine is: a does not start until b has been
+  // turned away, and b sleeps for five seconds, far longer than a needs to finish (git is slow on Windows).
   async function run(aStep: MockStep, extra: Partial<PlanSpec> = {}) {
     const repo = await makeRepo();
     let bCalls = 0;
+    let bTurnedAway!: () => void;
+    const bWasTurnedAway = new Promise<void>((resolve) => (bTurnedAway = resolve));
     const mock = new MockDriver((o): MockStep => {
-      if (taskOf(o) === 'a') return { ...aStep, delayMs: 500 };
-      return ++bCalls === 1 ? { ok: false, text: OVERLOADED } : { files: { 'b.txt': 'b\n' } };
+      if (taskOf(o) === 'a') return aStep;
+      if (++bCalls === 1) {
+        bTurnedAway();
+        return { ok: false, text: OVERLOADED };
+      }
+      return { files: { 'b.txt': 'b\n' } };
     });
+    const driver: Driver = {
+      name: 'mock',
+      run: async (o) => {
+        if (taskOf(o) === 'a') await bWasTurnedAway;
+        return mock.run(o);
+      },
+    };
     const plan: PlanSpec = { goal: 'g', driver: 'mock', concurrency: 2, tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p' }], ...extra };
-    const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(mock), retryDelaysMs: [1500] }).run();
+    const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(driver), retryDelaysMs: [5000] }).run();
     return { state, bCalls };
   }
 
@@ -88,13 +102,29 @@ describe('a reviewer on another agent', () => {
   it('that ran out of quota stops a task that is still working, not only tasks that have not started', async () => {
     const repo = await makeRepo();
     let bTries = 0;
-    const worker = new MockDriver((o): MockStep => (taskOf(o) === 'b' ? { files: { 'b.txt': ++bTries === 1 ? 'bad\n' : 'ok\n' }, delayMs: 1500 } : { files: { 'a.txt': 'ok\n' } }));
-    // a reaches its review first and finds the reviewer's account empty; b is then still in its first attempt, which fails its check.
-    const reviewer = new MockDriver(() => ({ ok: false, text: OUT_OF_USAGE }), 'rev');
+    let reviewerAsked!: () => void;
+    const reviewerWasAsked = new Promise<void>((resolve) => (reviewerAsked = resolve));
+    const mock = new MockDriver((o): MockStep => (taskOf(o) === 'b' ? { files: { 'b.txt': ++bTries === 1 ? 'bad\n' : 'ok\n' } } : { files: { 'a.txt': 'ok\n' } }));
+    // b's first attempt is held until a has reached its review and found the reviewer's account empty, so b is always
+    // still working when that happens; its check then fails and it wants a second attempt.
+    const worker: Driver = {
+      name: 'mock',
+      run: async (o) => {
+        if (taskOf(o) === 'b' && bTries === 0) {
+          await reviewerWasAsked;
+          await sleep(500); // a's task is marked as halted in the same breath, a moment after the reviewer answered
+        }
+        return mock.run(o);
+      },
+    };
+    const reviewer = new MockDriver(() => {
+      reviewerAsked();
+      return { ok: false, text: OUT_OF_USAGE };
+    }, 'rev');
     const plan = reviewed({ concurrency: 2, verify: ['node check.js'], tasks: [{ id: 'a', title: 'A', prompt: 'p' }, { id: 'b', title: 'B', prompt: 'p' }] });
     const state = await new Orchestrator({ repo, plan, drivers: new DriverRegistry().register(worker).register(reviewer) }).run();
     assert.equal(state.tasks.a!.status, 'failed');
-    assert.equal(workerCalls(worker, 'b'), 1, 'a second attempt would only end at the same empty reviewer');
+    assert.equal(bTries, 1, 'a second attempt would only end at the same empty reviewer');
     assert.equal(state.tasks.b!.status, 'failed');
     assert.match(state.tasks.b!.error!, /usage or credit limit reached/);
   });

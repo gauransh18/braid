@@ -361,6 +361,8 @@ svg.threads .spool { fill: var(--c); stroke: rgba(0, 0, 0, .3); stroke-width: 1.
 .prompt { white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
 .errbox { white-space: pre-wrap; background: var(--err-soft); color: var(--err); border-radius: 8px; padding: 10px; font-size: 12px; max-height: 220px; overflow: auto; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.agent-line { font-size: 12px; color: var(--muted); margin: -2px 0 10px; }
+.agent-line b, .ins-h .meta .agent b { color: var(--text); font-weight: 600; }
 .tab { border: 1px solid var(--line-2); background: var(--panel-2); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tx { display: flex; flex-direction: column; gap: 6px; }
@@ -1396,6 +1398,40 @@ $('insClose').addEventListener('click', closeInspector);
 $('scrim').addEventListener('click', closeInspector);
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInspector(); });
 
+/** "Claude Code (Anthropic) - claude-sonnet-5-5": who an agent is, and the model it ran with. */
+function agentLabel(a) {
+  if (!a || !a.driver) return '';
+  const names = { claude: 'Claude Code (Anthropic)', codex: 'Codex (OpenAI)', gemini: 'Gemini CLI (Google)', nim: 'NVIDIA NIM', mock: 'Mock agent' };
+  const model = a.model || (a.driver === 'nim' ? 'model chosen automatically' : 'the default model of the CLI');
+  return `${names[a.driver] || a.driver} \u00b7 ${model}`;
+}
+
+/** The agent of `role` on a task: what the run recorded, else what the plan names (a run from before that was recorded, or a task that has not started). Null when neither says. */
+function agentOf(plan, task, s, role) {
+  const seen = s && s.agents && s.agents[role];
+  if (seen) return seen;
+  const driver = task.driver || plan.driver;
+  if (!driver) return null;
+  const model = task.model || plan.model;
+  if (role !== 'reviewer') return { driver, model };
+  const r = { ...(plan.reviewer || {}), ...(task.reviewer || {}) };
+  const rd = r.driver || driver;
+  return { driver: rd, model: r.model || (rd === driver ? model : undefined) };
+}
+
+/** The agents on a task, one per role that has run (or that the plan names for the worker), without repeating the worker's. */
+function taskAgents(plan, task, s) {
+  const out = [];
+  const first = agentLabel(agentOf(plan, task, s, 'worker'));
+  if (first) out.push({ role: 'Worker', label: first });
+  for (const role of ['resolver', 'reviewer', 'replanner']) {
+    if (!(s && s.agents && s.agents[role])) continue;
+    const label = agentLabel(s.agents[role]);
+    if (label && label !== first) out.push({ role: role[0].toUpperCase() + role.slice(1), label });
+  }
+  return out;
+}
+
 function renderInspector(full) {
   const id = S.selected;
   const t = S.plan.tasks.find(x => x.id === id);
@@ -1403,6 +1439,7 @@ function renderInspector(full) {
   $('insTitle').textContent = t.title || id;
   $('insMeta').innerHTML = `<span class="chip ${s.status}">${esc(s.status)}</span>
     <span class="mono">${esc(id)}</span><span>attempt ${s.attempts || 0}/${maxAttempts(t)}</span><span class="mono" title="${esc(tokDetail(s.tokens))}">${esc(tokLine(s.tokens))}</span>
+    ${taskAgents(S.plan, t, s).map(a => `<span class="agent" title="The agent and model this role ran with">${esc(a.role)}: <b>${esc(a.label)}</b></span>`).join('')}
     ${(t.deps || []).length ? `<span>needs ${t.deps.map(d => `<b style="color:${colorOf(d)}">${esc(d)}</b>`).join(', ')}</span>` : ''}`;
   if (full || !$('insChecks')) {
     $('insBody').innerHTML = `
@@ -1429,8 +1466,11 @@ function renderLogs() {
   tabs.innerHTML = logs.map(l => `<button class="tab" role="tab" aria-selected="${key(l) === S.logTab}" data-k="${esc(key(l))}">${l.role === 'worker' ? 'Worker' : l.role === 'resolver' ? 'Resolver' : l.role === 'replanner' ? 'Replanner' : 'Reviewer'} #${l.attempt}</button>`).join('');
   tabs.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { S.logTab = b.dataset.k; renderLogs(); }));
   const log = logs.find(l => key(l) === S.logTab);
+  const task = S.plan.tasks.find(x => x.id === S.selected);
+  const ran = task && agentLabel(agentOf(S.plan, task, S.state.tasks[S.selected], log.role));
+  const who = ran ? `<div class="agent-line">${esc(log.role[0].toUpperCase() + log.role.slice(1))} #${log.attempt} ran on <b>${esc(ran)}</b></div>` : '';
   const nearBottom = $('insBody').scrollHeight - $('insBody').scrollTop - $('insBody').clientHeight < 80;
-  tx.innerHTML = (log.truncated ? '<div style="color:var(--faint);font-size:12px">Earlier events trimmed.</div>' : '') + log.events.map(e => {
+  tx.innerHTML = who + (log.truncated ? '<div style="color:var(--faint);font-size:12px">Earlier events trimmed.</div>' : '') + log.events.map(e => {
     switch (e.kind) {
       case 'text': return `<div class="msg">${esc(e.text)}</div>`;
       case 'tool': return `<div class="tool"><b>${esc(e.name)}</b><code class="mono">${esc(summarizeInput(e.input))}</code></div>`;

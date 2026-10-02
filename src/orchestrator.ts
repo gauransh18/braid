@@ -620,6 +620,22 @@ export class Orchestrator {
     const s = this.state.tasks[task.id]!;
     const userAbort = () => this.opts.signal?.aborted === true;
 
+    // Say who is doing this, and with which model once the agent reports it: the dashboard shows it next to the log.
+    const who = (model?: string) => {
+      if (s.agents?.[role]?.driver === agent && s.agents[role]!.model === model) return;
+      s.agents = { ...s.agents, [role]: { driver: agent, ...(model ? { model } : {}) } };
+      void this.save();
+    };
+    who(opts.model);
+    const forward = opts.onEvent;
+    opts = {
+      ...opts,
+      onEvent: (e) => {
+        if (e.kind === 'start' && e.model) who(e.model);
+        forward?.(e);
+      },
+    };
+
     for (let retry = 0; ; retry++) {
       // Timers above 2^31 - 1 ms fire at once, so a huge limit has to be capped rather than passed on.
       const limit = task.timeoutMin > 0 ? AbortSignal.timeout(Math.min(task.timeoutMin * 60_000, MAX_TIMER_MS)) : undefined;

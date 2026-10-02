@@ -145,6 +145,12 @@ export interface TaskState {
   replacedBy?: string[];
   /** Set on a task the planner created: the failed task it replaces. */
   replanOf?: string;
+  /**
+   * Who did the work, by role (worker, resolver, reviewer, replanner): the agent and the model it actually ran with.
+   * The model is the one the agent reported when it started, so it is also known when the plan named none (NVIDIA NIM
+   * chooses one itself, the CLIs use their own default).
+   */
+  agents?: Record<string, { driver: string; model?: string }>;
 }
 
 export interface RunState {

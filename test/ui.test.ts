@@ -103,7 +103,7 @@ describe('the script in ui/index.html', () => {
 
   it('declares the functions these tests load', () => {
     const { page } = loadPage({});
-    for (const name of ['runOutcome', 'renderBanner', 'esc', 'depthMap', 'tokLine']) {
+    for (const name of ['runOutcome', 'renderBanner', 'esc', 'depthMap', 'tokLine', 'agentLabel', 'agentOf', 'taskAgents']) {
       assert.ok(typeof page[name] === 'function' || vm.runInContext(`typeof ${name}`, page) === 'function', `${name} is gone or no longer a plain function declaration`);
     }
   });
@@ -131,6 +131,47 @@ describe('the page helpers', () => {
       assert.equal(call('tokLine(sample)'), describeTokens(tokens, false), `${n} tokens`);
     }
     assert.equal(call('tokLine(undefined)'), '-');
+  });
+
+  it('names the agent and the model a worker ran with', () => {
+    assert.equal(call(`agentLabel({ driver: 'nim', model: 'nvidia/nemotron-3-super-120b-a12b' })`), 'NVIDIA NIM \u00b7 nvidia/nemotron-3-super-120b-a12b');
+    assert.equal(call(`agentLabel({ driver: 'claude', model: 'claude-sonnet-5-5' })`), 'Claude Code (Anthropic) \u00b7 claude-sonnet-5-5');
+    assert.equal(call(`agentLabel({ driver: 'nim' })`), 'NVIDIA NIM \u00b7 model chosen automatically');
+    assert.equal(call(`agentLabel({ driver: 'codex' })`), 'Codex (OpenAI) \u00b7 the default model of the CLI');
+    assert.equal(call(`agentLabel({ driver: 'custom' })`), 'custom \u00b7 the default model of the CLI');
+    assert.equal(call('agentLabel(undefined)'), '');
+  });
+
+  it('takes the agents of a task from the run, else from the plan, else says nothing', () => {
+    const agents = (plan: unknown, task: unknown, s: unknown) => {
+      page.plan = plan;
+      page.task = task;
+      page.s = s;
+      return JSON.parse(call('JSON.stringify(taskAgents(plan, task, s))')) as { role: string; label: string }[];
+    };
+    // Recorded by the run: the model the agent reported wins over the plan.
+    assert.deepEqual(agents({ driver: 'nim', model: 'old' }, {}, { agents: { worker: { driver: 'nim', model: 'new' } } }), [{ role: 'Worker', label: 'NVIDIA NIM \u00b7 new' }]);
+    // A task that has not started, or a run from before the record: what the plan names.
+    assert.deepEqual(agents({ driver: 'codex', model: 'gpt-x' }, {}, {}), [{ role: 'Worker', label: 'Codex (OpenAI) \u00b7 gpt-x' }]);
+    assert.deepEqual(agents({ driver: 'codex' }, { driver: 'claude', model: 'm' }, undefined), [{ role: 'Worker', label: 'Claude Code (Anthropic) \u00b7 m' }]);
+    // Nothing named anywhere: the page cannot know the default, so it does not guess.
+    assert.deepEqual(agents({}, {}, {}), []);
+    // A reviewer is listed only when it is not the same agent and model as the worker.
+    const same = { worker: { driver: 'nim', model: 'm' }, reviewer: { driver: 'nim', model: 'm' } };
+    assert.deepEqual(agents({}, {}, { agents: same }).map((a) => a.role), ['Worker']);
+    const other = { worker: { driver: 'nim', model: 'm' }, reviewer: { driver: 'codex', model: 'gpt-x' } };
+    assert.deepEqual(agents({}, {}, { agents: other }).map((a) => a.role), ['Worker', 'Reviewer']);
+  });
+
+  it('works out the reviewer a plan names the way the orchestrator does', () => {
+    const reviewer = (plan: unknown, task: unknown) => {
+      page.plan = plan;
+      page.task = task;
+      return JSON.parse(call(`JSON.stringify(agentOf(plan, task, {}, 'reviewer'))`));
+    };
+    assert.deepEqual(reviewer({ driver: 'claude', model: 'm', reviewer: { driver: 'codex' } }, {}), { driver: 'codex' }, "another agent does not inherit the worker's model");
+    assert.deepEqual(reviewer({ driver: 'claude', model: 'm' }, {}), { driver: 'claude', model: 'm' }, "the same agent keeps the worker's model");
+    assert.deepEqual(reviewer({ driver: 'claude', reviewer: { model: 'a' } }, { reviewer: { model: 'b' } }), { driver: 'claude', model: 'b' }, "the task's fields win over the plan's");
   });
 });
 

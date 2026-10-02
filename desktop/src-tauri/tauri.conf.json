@@ -27,6 +27,10 @@
     ],
     "externalBin": [
       "binaries/braid"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": false
+    }
   }
 }

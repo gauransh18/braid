@@ -160,7 +160,7 @@ braid resume [runId]   # defaults to the newest unfinished run
 
 ## Desktop app (macOS and Windows)
 
-`npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. Needs Rust, Bun and the Tauri CLI (`cargo install tauri-cli --version "^2" --locked`). Output is in `desktop/src-tauri/target/release/bundle/`. The app is unsigned, so macOS will warn on other people's machines.
+`npm run build:desktop` builds the app with [Tauri](https://tauri.app): `Braid.app` and a `.dmg` (about 30 MB) on a Mac, an installer (`Braid_<version>_x64-setup.exe`) on Windows. Everything below applies to both unless it says otherwise. Needs Rust, Bun and the Tauri CLI (`cargo install tauri-cli --version "^2" --locked`). Output is in `desktop/src-tauri/target/release/bundle/`. The macOS app is signed ad hoc, not with an Apple Developer ID, and not notarized, so macOS refuses to open a downloaded copy at first (on Apple silicon the first message can read "damaged"). Allow it under **System Settings > Privacy & Security > Open Anyway**, or run `xattr -cr /Applications/Braid.app` once. Building it yourself (`npm run build:desktop`) signs the whole bundle ad hoc, with the hardened runtime off because the bundled `braid` is a Bun executable that needs to compile code at run time, and a copy that was never downloaded opens without any of this.
 
 <p align="center">
   <img src="docs/images/desktop-launcher.png" alt="The launcher window: Open Repository, Watch a demo run, and a list of recent repositories" width="300">

@@ -6,6 +6,9 @@
   "verify": ["npm test"],
   "maxAttempts": 2,
   "maxTurns": 40,
+  "contracts": [
+    { "name": "error response", "meaning": "JSON {error, code}, status 400 for invalid input", "tasks": ["errors", "wire"] }
+  ],
   "tasks": [
     {
       "id": "schema",

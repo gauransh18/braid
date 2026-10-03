@@ -4,7 +4,7 @@ import type { DriverRegistry, DriverRunOptions } from './drivers/driver.js';
 import { AgentUnavailableError, classifyAgentFailure } from './failures.js';
 import { Git } from './git.js';
 import { terminalHint } from './hints.js';
-import { applyReplan, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
+import { applyReplan, inheritContracts, READ_ONLY_TOOLS, resolveTask, validatePlan, type ReplanDraft, type ResolvedTask } from './plan.js';
 import { hostIdentity } from './host.js';
 import { abortError, pidAlive, SHELL_TIMEOUT_MS, shell, type ShellResult } from './proc.js';
 import { Sandbox } from './sandbox.js';
@@ -589,6 +589,7 @@ export class Orchestrator {
         this.tasks.set(spec.id, resolveTask(this.plan, spec));
         this.state.tasks[spec.id] = { id: spec.id, status: 'pending', attempts: 0, costUsd: 0, replanOf: task.id };
       }
+      inheritContracts(this.plan, task.id, added.map((t) => t.id));
       await this.store.savePlan(this.plan);
       const ids = added.map((t) => t.id);
       this.store.event('replan', { task: task.id, ok: true, reason: draft.reason ?? '', added: ids });

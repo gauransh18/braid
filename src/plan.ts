@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { PlanSpec, TaskSpec } from './types.js';
+import type { ContractSpec, PlanSpec, TaskSpec } from './types.js';
 
 export const DEFAULT_ALLOWED_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'];
@@ -48,6 +48,7 @@ export function validatePlan(plan: PlanSpec): void {
   for (const t of plan?.tasks ?? []) {
     for (const d of t.deps ?? []) if (!ids.has(d)) errors.push(`task "${t.id}" depends on unknown "${d}"`);
   }
+  checkContracts(errors, plan?.contracts, ids);
   const sb = plan?.sandbox;
   if (sb) {
     if (!sb.image || typeof sb.image !== 'string') errors.push('sandbox.image must be a string');
@@ -67,6 +68,27 @@ function checkStrings(errors: string[], name: string, value: unknown, patterns: 
   if (!Array.isArray(value) || value.some((x) => typeof x !== 'string' || !x.trim())) {
     errors.push(`${name} must be an array of non-empty strings${patterns ? ' (paths or globs such as "src/auth/**")' : ' (shell commands)'}`);
   }
+}
+
+function checkContracts(errors: string[], value: unknown, ids: ReadonlySet<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    errors.push('plan.contracts must be an array like [{"name": "amount", "meaning": "integer cents", "tasks": ["billing"]}]');
+    return;
+  }
+  const names = new Set<string>();
+  value.forEach((c: unknown, i) => {
+    const at = `plan.contracts[${i}]`;
+    if (typeof c !== 'object' || c === null || Array.isArray(c)) return void errors.push(`${at} must be an object`);
+    const { name, meaning, tasks } = c as Record<string, unknown>;
+    if (typeof name !== 'string' || !name.trim()) errors.push(`${at}.name must be a non-empty string`);
+    else if (names.has(name)) errors.push(`${at}: duplicate contract "${name}"`);
+    else names.add(name);
+    if (typeof meaning !== 'string' || !meaning.trim()) errors.push(`${at}.meaning must be a non-empty string`);
+    if (tasks === undefined) return;
+    if (!Array.isArray(tasks) || tasks.some((t) => typeof t !== 'string')) errors.push(`${at}.tasks must be an array of task ids`);
+    else for (const t of tasks) if (!ids.has(t)) errors.push(`${at} names unknown task "${t}"`);
+  });
 }
 
 function checkReviewer(errors: string[], name: string, value: unknown): void {
@@ -120,6 +142,37 @@ function resolveReviewer(plan: PlanSpec, t: TaskSpec, driver: string, model: str
   const sharedModel = shared?.model && rdriver === (shared.driver ?? driver) ? shared.model : undefined;
   const fallback = rdriver === driver ? model : rdriver === (plan.driver ?? 'claude') ? plan.model : undefined;
   return { driver: rdriver, model: own?.model ?? sharedModel ?? fallback };
+}
+
+/** The contracts a task is told: those that name it, and those that name no task (they hold everywhere). */
+export function contractsFor(plan: PlanSpec, taskId: string): ContractSpec[] {
+  return (plan.contracts ?? []).filter((c) => !c.tasks || c.tasks.includes(taskId));
+}
+
+/**
+ * Keep the contracts a planner proposed that can be used. A model slips on a task id now and then, and one bad id
+ * should not throw the whole plan away: unknown ids are dropped from a contract, and a contract left naming no task
+ * (it named some, none exist) is dropped with them.
+ */
+export function cleanContracts(raw: unknown, taskIds: ReadonlySet<string>): ContractSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: ContractSpec[] = [];
+  for (const c of raw) {
+    if (typeof c !== 'object' || c === null) continue;
+    const { name, meaning, tasks } = c as Record<string, unknown>;
+    if (typeof name !== 'string' || !name.trim() || typeof meaning !== 'string' || !meaning.trim() || seen.has(name)) continue;
+    const named = Array.isArray(tasks) ? tasks.filter((t): t is string => typeof t === 'string' && taskIds.has(t)) : undefined;
+    if (Array.isArray(tasks) && !named?.length) continue;
+    seen.add(name);
+    out.push({ name: name.trim(), meaning: meaning.trim(), ...(named ? { tasks: named } : {}) });
+  }
+  return out;
+}
+
+/** Tasks that replace a failed one are held to the same contracts as the task they replace. */
+export function inheritContracts(plan: PlanSpec, failedId: string, addedIds: string[]): void {
+  for (const c of plan.contracts ?? []) if (c.tasks?.includes(failedId)) c.tasks = [...c.tasks, ...addedIds];
 }
 
 /** Apply plan-level defaults to a task. */

@@ -259,6 +259,7 @@ See [examples/plan.json](examples/plan.json). The fields are:
 | `verifyMerge` | both | Commands for the check on the combined tree after a merge (they run in the integration worktree). Default: the plan's `verifyMerge`, then the task's own `verify`. Lets a task run the full suite on its own and a quick smoke test on the merge; `[]` skips the check after the merge |
 | `review` | both | Run a read-only reviewer on the diff |
 | `reviewer` | both | Which agent reviews: `{"driver": "codex", "model": "..."}`. A field set on the task wins over the plan's. What is left out falls back to the task's own agent and model, and a model only carries over to the agent it was meant for. Only used when `review` is on |
+| `contracts` | plan | What a piece of data shared between tasks means, one line each: `[{"name": "amount", "meaning": "integer cents, never dollars", "tasks": ["billing", "invoice"]}]`. Every task it names is told the meaning, and the reviewer rejects a diff that reads the data differently. Without `tasks`, every task is told. `braid plan` proposes them when tasks share data. See below |
 | `touches` | task | Paths or globs the task expects to change, such as `["src/auth/**", "package.json"]`. Two tasks whose `touches` could match the same path never run at the same time: the second waits, and the dashboard says so. A task with no `touches` is never held back and never holds another back. See below |
 | `maxAttempts` | both | Tries, including retries with feedback (default 2) |
 | `allowedTools` | both | Agent tool allowlist (default: no Bash) |
@@ -273,6 +274,14 @@ no wildcard and no dot (other than a leading one, as in `src` or `.github`), als
 has a dot inside (`vendor/github.com`) is read as a file, so write it as `vendor/github.com/` or `vendor/github.com/**`. A bracket
 name such as `app/[id]` or `[...slug]` is read as a directory. A task is only held back by tasks that are running, so tasks that all
 overlap run one at a time and cannot wait for each other forever.
+
+**`contracts`.** Two agents can each get a shared field right on their own and still disagree about it: one stores `amount` in
+cents and the other reads it as dollars, one writes UTC and the other local time, one counts from 0 and the other from 1. Git sees
+no conflict and each task's own tests pass. Unit, format, timezone, indexing, nullability, ordering, allowed values: a contract says
+which it is, once, and braid puts it in the prompt of every task it names (and of the tasks that replace one that failed) before
+anyone starts. A reviewer with `review` on is also told to reject a diff that reads, writes or converts that data differently.
+This is a prompt and a review, not a proof. The tests on the merged tree are still what catches it for certain, so pair a contract
+with a test that pins the meaning, such as one that runs producer to consumer and asserts the final amount.
 
 **Reviewer.** A reviewer that fails without giving a verdict (a model it does not have, no login) fails the task and names the
 reviewer, instead of sending the worker back to redo verified work. A reviewer whose program is not installed stops new tasks that

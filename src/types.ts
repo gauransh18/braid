@@ -60,6 +60,20 @@ export interface SandboxSpec {
   cpus?: string;
 }
 
+/**
+ * What a piece of data shared between tasks means, in one line: `amount` is integer cents, `createdAt` is a UTC ISO 8601
+ * string. Two workers can each get a shared field right on their own and still disagree about it; git sees no conflict
+ * and each task's tests pass. A contract is told to every task it names, and the reviewer checks the diff against it.
+ */
+export interface ContractSpec {
+  /** The field, function, column or concept, as the code names it. */
+  name: string;
+  /** What it means: unit, format, nullability, ordering, whatever the tasks could otherwise read differently. */
+  meaning: string;
+  /** Ids of the tasks that read or write it. Without it, every task is told. */
+  tasks?: string[];
+}
+
 export interface PlanSpec {
   goal: string;
   /** Branch the run starts from. Never modified by the harness. */
@@ -97,6 +111,8 @@ export interface PlanSpec {
   /** How many times the run may ask the planner to split or rewrite a task that failed for good. 0 (default) = never. */
   maxReplans?: number;
   sandbox?: SandboxSpec;
+  /** Meanings shared across tasks (units, formats, nullability), told to the tasks they name and checked by the reviewer. */
+  contracts?: ContractSpec[];
   tasks: TaskSpec[];
 }
 

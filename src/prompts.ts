@@ -1,16 +1,34 @@
-import type { PlanSpec } from './types.js';
-import { MAX_REPLACEMENT_TASKS, type ResolvedTask } from './plan.js';
+import type { ContractSpec, PlanSpec } from './types.js';
+import { contractsFor, MAX_REPLACEMENT_TASKS, type ResolvedTask } from './plan.js';
 
 export interface Feedback {
   attempt: number;
   reason: string;
 }
 
+/**
+ * The meanings other workers are told too. Two workers can each get a shared field right alone and still disagree about
+ * it (cents and dollars, seconds and milliseconds), and git sees no conflict, so this is said before either starts.
+ */
+function contractSection(plan: PlanSpec, task: ResolvedTask): string {
+  const contracts = contractsFor(plan, task.id);
+  if (!contracts.length) return '';
+  const line = (c: ContractSpec) => {
+    const others = (c.tasks ?? []).filter((t) => t !== task.id);
+    return `- ${c.name}: ${c.meaning}${others.length ? ` (also used by: ${others.join(', ')})` : ''}`;
+  };
+  return [
+    'Shared contracts. These meanings hold across the whole plan and the other workers are told the same, so follow them wherever you read or write the data they name, and do not change them:',
+    contracts.map(line).join('\n'),
+  ].join('\n');
+}
+
 export function workerPrompt(plan: PlanSpec, task: ResolvedTask, feedback: Feedback[]): string {
-  const parts = [
+  const parts: string[] = [
     `You are one worker in a team of coding agents. Overall goal: ${plan.goal}`,
     `Your task (${task.id}): ${task.title}`,
     task.prompt,
+    contractSection(plan, task),
     [
       'Rules:',
       '- Work only inside the current directory. It is an isolated git worktree; do not run git commands.',
@@ -21,7 +39,7 @@ export function workerPrompt(plan: PlanSpec, task: ResolvedTask, feedback: Feedb
     ]
       .filter(Boolean)
       .join('\n'),
-  ];
+  ].filter(Boolean);
   if (feedback.length) {
     parts.push(
       'Previous attempts were rejected. The worktree still contains the last attempt; fix it rather than starting over.',
@@ -40,6 +58,7 @@ export function conflictPrompt(plan: PlanSpec, task: ResolvedTask, files: string
     `You are one worker in a team of coding agents. Overall goal: ${plan.goal}`,
     `Your task (${task.id}): ${task.title}`,
     task.prompt,
+    contractSection(plan, task),
     'You already finished this task. Meanwhile other workers merged their own tasks, and the harness has merged that newer work into your branch. Git could not combine these files automatically and left conflict markers (<<<<<<<, =======, >>>>>>>) in them:',
     files.map((f) => `- ${f}`).join('\n'),
     leftover.length ? `Your previous resolution left markers in: ${leftover.join(', ')}. Finish those.` : '',
@@ -59,13 +78,18 @@ export function conflictPrompt(plan: PlanSpec, task: ResolvedTask, files: string
 }
 
 export function reviewerPrompt(plan: PlanSpec, task: ResolvedTask, diff: string): string {
+  const contracts = contractSection(plan, task);
   return [
     `You are a strict code reviewer. Overall goal: ${plan.goal}`,
     `The change below implements task "${task.id}": ${task.title}\n${task.prompt}`,
+    contracts,
     'Review the diff for correctness bugs, missing requirements, and changes outside the task scope. You may read files in the current directory for context. Ignore style nits.',
+    contracts ? 'Also check the shared contracts above: reject a diff that reads, writes, converts or documents the data they name with a different meaning, such as another unit, format, timezone, indexing or nullability.' : '',
     `Diff:\n\`\`\`diff\n${diff || '(empty diff)'}\n\`\`\``,
     'Reply with ONLY a JSON object, no prose: {"approve": boolean, "issues": ["concrete problem and where", ...]}. Approve when there are no blocking issues.',
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Ask the planner why a task failed for good and what should replace it. */
@@ -99,9 +123,10 @@ export function plannerPrompt(goal: string, verify: string[]): string {
     'Read the repository as needed, then break the goal into 1-8 tasks. Each task runs in its own git worktree, is merged after it passes verification, and must be completable independently given its deps. Prefer fewer, well-scoped tasks. Tasks that touch the same files should depend on each other rather than run in parallel.',
     'Give every task "touches": the repo-relative paths or globs it expects to change, as narrow as you can (for example "src/auth/**", "src/api/routes.ts", "package.json"; "dir/**" for a whole directory, "**" if it could change anything). Tasks whose touches overlap are never run at the same time, so keep them disjoint where the work allows and add a dep when one task must build on another.',
     'Each prompt must be self-contained: objective, files or areas to touch, and definition of done.',
+    'When two or more tasks read or write the same piece of data (a field, a column, a message, a config value), add a "contracts" entry that pins what it means: unit, format, timezone, indexing, nullability, ordering, the allowed values. Say it once, in one line, and name the tasks that use it. Two workers can each get a shared field right alone and still disagree about it, and nothing else catches that. Leave "contracts" empty when no data is shared.',
     verify.length ? `Every task will be verified with: ${verify.join(', ')}` : '',
     'Reply with ONLY a JSON object, no prose:',
-    '{"goal": string, "tasks": [{"id": "kebab-case", "title": string, "prompt": string, "deps": [task ids], "touches": [paths or globs]}]}',
+    '{"goal": string, "contracts": [{"name": string, "meaning": string, "tasks": [task ids]}], "tasks": [{"id": "kebab-case", "title": string, "prompt": string, "deps": [task ids], "touches": [paths or globs]}]}',
   ]
     .filter(Boolean)
     .join('\n\n');

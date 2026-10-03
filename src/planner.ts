@@ -1,5 +1,5 @@
 import type { Driver } from './drivers/driver.js';
-import { DEFAULT_TIMEOUT_MIN, READ_ONLY_TOOLS, validatePlan } from './plan.js';
+import { cleanContracts, DEFAULT_TIMEOUT_MIN, READ_ONLY_TOOLS, validatePlan } from './plan.js';
 import { extractJson, plannerPrompt } from './prompts.js';
 import type { PlanSpec } from './types.js';
 
@@ -33,12 +33,14 @@ export async function planGoal(
   if (!res.ok) throw new Error(`planner failed: ${res.text.slice(0, 1000)}`);
   const draft = extractJson<PlanSpec>(res.text);
   if (!draft) throw new Error(`planner returned no JSON plan:\n${res.text.slice(0, 1000)}`);
+  const contracts = cleanContracts(draft.contracts, new Set((draft.tasks ?? []).map((t) => t?.id)));
   const plan: PlanSpec = {
     goal: draft.goal || opts.goal,
     concurrency: 3,
     maxAttempts: 2,
     review: true,
     ...(opts.verify?.length ? { verify: opts.verify } : {}),
+    ...(contracts.length ? { contracts } : {}),
     tasks: draft.tasks,
   };
   validatePlan(plan);
